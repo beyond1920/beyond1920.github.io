@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 5.4.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/all.min.css">
+
+<script id="hexo-configurations">
+    var NexT = window.NexT || {};
+    var CONFIG = {"hostname":"flink.wjh.me","root":"/","scheme":"Muse","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":false,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}};
+  </script>
+
+  <meta name="description" content="前言本文是 Flink SQL 系列中的一篇，更多文章请关注Flink SQL 系列文档。内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。 背景业务上经常有天级别聚合，按分钟打点的需求，比如计算当天的 UV和PV，但是分钟级别打点。目前 Flink 有两种方案来支持这种需求。 老方案是 Early fire 方案，即开天级别 Tumble Window，每分钟触发一次。Earl">
+<meta property="og:type" content="article">
+<meta property="og:title" content="针对天级别聚合且按分钟打点的需求，方案演进之路">
+<meta property="og:url" content="https://flink.wjh.me/day-acc-solution/index.html">
+<meta property="og:site_name" content="张静">
+<meta property="og:description" content="前言本文是 Flink SQL 系列中的一篇，更多文章请关注Flink SQL 系列文档。内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。 背景业务上经常有天级别聚合，按分钟打点的需求，比如计算当天的 UV和PV，但是分钟级别打点。目前 Flink 有两种方案来支持这种需求。 老方案是 Early fire 方案，即开天级别 Tumble Window，每分钟触发一次。Earl">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="https://flink.wjh.me/day-acc-solution/c2e4c356f99e4fedc954df39c2fbadfe-20210911173210938.png">
+<meta property="og:image" content="https://flink.wjh.me/day-acc-solution/213cc7ac62e07e36778294528cebb66a-20210911173210959.png">
+<meta property="og:image" content="https://flink.wjh.me/day-acc-solution/d74ace772931300fe7ab7a27b0fc1774-20210911173211011.png">
+<meta property="og:image" content="https://flink.wjh.me/day-acc-solution/3c2699738f5a96677e7c1ec79f4e0731-20210911173210824.png">
+<meta property="article:published_time" content="2021-09-11T10:43:06.000Z">
+<meta property="article:modified_time" content="2021-09-11T14:08:00.836Z">
+<meta property="article:author" content="张静">
+<meta property="article:tag" content="Window Aggregate">
+<meta property="article:tag" content="Flink">
+<meta property="article:tag" content="Flink SQL">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://flink.wjh.me/day-acc-solution/c2e4c356f99e4fedc954df39c2fbadfe-20210911173210938.png">
+
+<link rel="canonical" href="https://flink.wjh.me/day-acc-solution/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome : false,
+    isPost : true,
+    lang   : 'en'
+  };
+</script>
+
+  <title>针对天级别聚合且按分钟打点的需求，方案演进之路 | 张静</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="Toggle navigation bar">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+
+  <div class="site-meta">
+
+    <a href="/" class="brand" rel="start">
+      <span class="logo-line-before"><i></i></span>
+      <h1 class="site-title">张静</h1>
+      <span class="logo-line-after"><i></i></span>
+    </a>
+  </div>
+
+  <div class="site-nav-right">
+    <div class="toggle popup-trigger">
+    </div>
+  </div>
+</div>
+
+
+
+
+<nav class="site-nav">
+  <ul id="menu" class="main-menu menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="home fa-fw"></i>Home</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-user fa-fw"></i>About</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="tags fa-fw"></i>Tags</a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-archive fa-fw"></i>Archives</a>
+
+  </li>
+  </ul>
+</nav>
+
+
+
+
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+  <a href="https://github.com/beyond1920" class="github-corner" title="Follow me on GitHub" aria-label="Follow me on GitHub" rel="noopener" target="_blank"><svg width="80" height="80" viewBox="0 0 250 250" aria-hidden="true"><path d="M0,0 L115,115 L130,115 L142,142 L250,250 L250,0 Z"></path><path d="M128.3,109.0 C113.8,99.7 119.0,89.6 119.0,89.6 C122.0,82.7 120.5,78.6 120.5,78.6 C119.2,72.0 123.4,76.3 123.4,76.3 C127.3,80.9 125.5,87.3 125.5,87.3 C122.9,97.6 130.6,101.9 134.4,103.2" fill="currentColor" style="transform-origin: 130px 106px;" class="octo-arm"></path><path d="M115.0,115.0 C114.9,115.1 118.7,116.5 119.8,115.4 L133.7,101.6 C136.9,99.2 139.9,98.4 142.2,98.6 C133.8,88.0 127.5,74.4 143.8,58.0 C148.5,53.4 154.0,51.2 159.7,51.0 C160.3,49.4 163.2,43.6 171.4,40.1 C171.4,40.1 176.1,42.5 178.8,56.2 C183.1,58.6 187.2,61.8 190.9,65.4 C194.5,69.0 197.7,73.2 200.1,77.6 C213.8,80.2 216.3,84.9 216.3,84.9 C212.7,93.1 206.9,96.0 205.4,96.6 C205.1,102.4 203.0,107.8 198.3,112.5 C181.9,128.9 168.3,122.5 157.7,114.1 C157.9,116.9 156.7,120.9 152.7,124.9 L141.0,136.5 C139.8,137.7 141.6,141.9 141.8,141.8 Z" fill="currentColor" class="octo-body"></path></svg></a>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content post posts-expand">
+            
+
+    
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="en">
+    <link itemprop="mainEntityOfPage" href="https://flink.wjh.me/day-acc-solution/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="张静">
+      <meta itemprop="description" content="">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="张静">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          针对天级别聚合且按分钟打点的需求，方案演进之路
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-calendar"></i>
+              </span>
+              <span class="post-meta-item-text">Posted on</span>
+              
+
+              <time title="Created: 2021-09-11 18:43:06 / Modified: 22:08:00" itemprop="dateCreated datePublished" datetime="2021-09-11T18:43:06+08:00">2021-09-11</time>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h1><p>本文是 Flink SQL 系列中的一篇，更多文章请关注<a href="/">Flink SQL 系列文档</a>。<br>内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。</p>
+<h1 id="背景"><a href="#背景" class="headerlink" title="背景"></a>背景</h1><p>业务上经常有天级别聚合，按分钟打点的需求，比如计算当天的 UV和PV，但是分钟级别打点。目前 Flink 有两种方案来支持这种需求。</p>
+<p>老方案是 Early fire 方案，即开天级别 Tumble Window，每分钟触发一次。<br>Early fire 用于在窗口结束前以固定周期把中间结果发给下游，发出去的结果和触发的时机没有严格的对应关系。<br>基于 Early fire 机制，并没有把数据做严格的窗口划分，有如下限制：</p>
+<ol>
+<li>各个并发触发的时间是不对齐且不确定的</li>
+<li>max(ts) 的结果作为看板的时间戳，每个max(ts) 时间点对应的 sum(num) 值，并不保证表示这个时间点及以前的所有累计值，可能有部分这个业务时间上发生的数据打到后面的时间戳上。</li>
+</ol>
+<p>因为 Early fire 机制，并没有做到数据级别严格划窗口，这种方案会出现：</p>
+<ol>
+<li>漏点，导致曲线不平滑</li>
+<li>掉坑</li>
+<li>分维度的累计值和总维度的累计值不相同的各种问题。<br>针对Early fire 方案上面的三个缺陷，虽然分别采用了一些临时方案绕过，但是这些临时方案都有缺陷，下文会详细介绍。这说明 Early fire 方案并不是解决该业务需求的完美方案。</li>
+</ol>
+<p>为了彻底解决 Early fire 的痛点，推出新方案 Cumualate Window 。这种方案可以一举解决老方案上面提到的所有问题。该方案在在各项活动里得到生产验证。<br>本文会说明为何 Cumualate Window 方案可以一举解决这些问题。</p>
+<h1 id="Early-fire-方案缺点剖析及临时解决方案"><a href="#Early-fire-方案缺点剖析及临时解决方案" class="headerlink" title="Early fire 方案缺点剖析及临时解决方案"></a>Early fire 方案缺点剖析及临时解决方案</h1><h2 id="缺陷1-自增指标曲线有凹坑"><a href="#缺陷1-自增指标曲线有凹坑" class="headerlink" title="缺陷1:自增指标曲线有凹坑"></a>缺陷1:自增指标曲线有凹坑</h2><h3 id="问题描述"><a href="#问题描述" class="headerlink" title="问题描述"></a>问题描述</h3><p>大部分活动作业都引入两层聚合来解决上一节中提到的数据倾斜问题。两层聚合的作业（不管使用 Unbounded Aggregate 还是 Window Aggregate）偶发出现理论上自增的聚合指标（PV/UV/…），在曲线上出现掉坑。该问题的本质原因是 Flink 引擎的 retraction 机制没有把 update before 消息和 update after 编码在同一个消息里，而是分在两个单独的消息里，下游算子也会分开处理 update before 消息和 update after 消息。以如下的 SQL 为例详细分析：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">INSERT</span> <span class="keyword">INTO</span> Sink</span><br><span class="line"><span class="keyword">SELECT</span> </span><br><span class="line">  <span class="built_in">max</span>(server_timestamp) <span class="keyword">as</span> server_timestamp,       </span><br><span class="line">  <span class="built_in">sum</span>(cash_cnt) <span class="keyword">AS</span> cash_cnt</span><br><span class="line"><span class="keyword">FROM</span></span><br><span class="line">  (</span><br><span class="line">    <span class="keyword">SELECT</span> </span><br><span class="line">      <span class="built_in">max</span>(<span class="built_in">cast</span>(server_timestamp <span class="keyword">AS</span> <span class="type">BIGINT</span>)) <span class="keyword">AS</span> server_timestamp,</span><br><span class="line">      tumble_start(server_timestamp, <span class="type">INTERVAL</span> <span class="string">&#x27;1&#x27;</span> <span class="keyword">DAY</span>) <span class="keyword">AS</span> w_start</span><br><span class="line">   <span class="keyword">FROM</span> kwaistream_intermedia.wrapped_source_table</span><br><span class="line">   <span class="keyword">GROUP</span> <span class="keyword">BY</span> </span><br><span class="line">    <span class="built_in">mod</span>(user_id, <span class="number">2048</span>),</span><br><span class="line">    tumble(server_timestamp,<span class="type">INTERVAL</span> <span class="string">&#x27;1&#x27;</span> <span class="keyword">DAY</span>)</span><br><span class="line">  )t</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> w_start;</span><br></pre></td></tr></table></figure>
+
+<p>为了解决倾斜问题，里层的聚合按照 user_id 分成2048个桶计算每个桶下当天的累计 PV，外层聚合合并桶计算当天累计的总 PV 值。假设 01:02:00 这个时刻，作业的各个算子的状态如下图所示。里层聚合的两个桶的 State 分别是 (01:00:00,1)、 (01:00:00,2)，外层聚合的 State 是 (01:00:00,3)。<br><img src="c2e4c356f99e4fedc954df39c2fbadfe-20210911173210938.png" alt="null"></p>
+<p>01:02:01（墙上时钟）进入两条数据 (01:01:01, 1)、(01:02:00, 1)，期待的曲线如下。<br><img src="213cc7ac62e07e36778294528cebb66a-20210911173210959.png" alt="null"></p>
+<p>两条输入数据分别分配到 Bucket1 和 Bucket2。作业收到这两条数据后，数据流如下：</p>
+<ol>
+<li>Flink 引擎的 retraction 机制没有把 update before 消息和 update after 编码在同一个消息里，而是分在两个单独的消息里。Bucket1 收到 (01:01:01, 1) 后，发送两条消息，Update Before 消息 (01:00:00,1)、Update After 消息 （01:01:01，2）。Bucket2 收到 (01:02:00, 1) 后，发送两条消息， Update Before 消息（01:00:00，2），Update After 消息（01:02:00，3）。</li>
+<li>4条数据经过网络后，外层聚合算子收到消息的顺序有可能变成 UB (01:00:00,1)、UB（01:00:00，2）、UA（01:01:01，2）、UA（01:02:00，3）。外层聚合算子依次处理这4条消息，先后发到下游 Kafka Sink 算子 8条消息 UB (01:00:00,3)、UA (01:00:00,2)、UB (01:00:00,2)、UA (00:59:00,0)、UB (00:59:00,0)、UA (01:01:01,2)、UB (01:01:01,2)、UA (01:02:00,5)。</li>
+<li>Kafka Sink 往 Kafka 写入的时候丢掉 Update Before 消息。</li>
+<li>Kafka 往 Druid 同步数据，Druid 做分钟粒度的聚合，取 1min 内的最大值。<br><img src="d74ace772931300fe7ab7a27b0fc1774-20210911173211011.png" alt="null"><br>实际的数据曲线如下，01:01 的数据比 01:00 小，原本应该自增的曲线上有凹坑。<br><img src="3c2699738f5a96677e7c1ec79f4e0731-20210911173210824.png" alt="null"></li>
+</ol>
+<h3 id="临时解决方案"><a href="#临时解决方案" class="headerlink" title="临时解决方案"></a>临时解决方案</h3><p>在这种方案里，Window 聚合算子输出的 Retract 流，而 Flink 引擎的 retraction 机制没有把 update before 消息和 update after 编码在同一个消息里，而是分在两个单独的消息里，下游算子也会分开处理 update before 消息和 update after 消息。虽然可以暂时用临时方案绕过，即在外层聚合里引入 UDAG （sum_max_long） 替换 sum 函数，sum_max_long UDAG 里记录历史上出现过的最大的 sum 值(max_sum)，发送数据时取 max(sum, max_sum)。<br>该方案有以下缺点：<br>（1）比较 hack，而且特别容易误用，这个特殊的 UDAG 只能用在递增的指标里，而且只能用在双层聚合的最外层聚合上，否则会出现正确性问题。<br>（2）只能做到最终的曲线不出现凹坑，即只是平滑了掉坑的点，而不能把错误的点修正成正确值。</p>
+<h2 id="缺陷2-当天累计UV-PV类曲线作业的不可回溯"><a href="#缺陷2-当天累计UV-PV类曲线作业的不可回溯" class="headerlink" title="缺陷2:当天累计UV/PV类曲线作业的不可回溯"></a>缺陷2:当天累计UV/PV类曲线作业的不可回溯</h2><h3 id="问题描述-1"><a href="#问题描述-1" class="headerlink" title="问题描述"></a>问题描述</h3><p>业务上有绘制当天累计的UV/PV 等指标曲线的需求，同时要求这类作业在主动回追数据或者作业发生failover，曲线基本和尽量保证曲线符合原始曲线。<br>如果只为了满足绘制天级别的数据曲线需求，Unbounded Aggregate 和 Window Aggregate 都可以满足需求。但是用 Unbounded Aggregate，一旦作业发生 failover 或者用户主动回追数据，曲线会和原始曲线有较大偏差。因此用 Unbounded Aggregate 不能满足数据曲线的可回溯性需求。因此锁定用 Window Aggregate 来解决该需求。开了1天的窗口，如果不开启 Early fire 机制，默认等窗口结束才会输出数据。这显然不满足用户的需求。基于 Early fire，可以在窗口结束前以固定周期把中间结果发给下游。但是引擎层提供的 Early fire 机制是基于 proctime ，在作业发生 failover 或者 主动回溯数据时，也会遇到和 Unbounded Aggregate 类似的问题，曲线会和原始曲线有较大偏差。如何尽量保证当天累计 UV/PV 类曲线作业的可回溯性？</p>
+<h3 id="临时解决方案-1"><a href="#临时解决方案-1" class="headerlink" title="临时解决方案"></a>临时解决方案</h3><p>基于 event time 的 Early fire 方案，即开天级别窗口，基于 event timer 每分钟触发一次。</p>
+<p>这种方案基于 Early fire 机制，并没有把数据做严格的窗口划分，有如下限制：</p>
+<ol>
+<li>各个并发触发的时间是不对齐且不确定的</li>
+<li>max(ts) 的结果作为看板的时间戳，每个max(ts) 时间点对应的 sum(num) 值，并不保证表示这个时间点及以前的所有累计值，可能有部分这个业务时间上发生的数据打到后面的时间戳上。</li>
+</ol>
+<p>这种方案基于 Early fire based on processing time 上改动较小，风险更小。但是由于 Early fire 机制并没有做到数据级别严格划窗口，这种方案的缺点：</p>
+<ol>
+<li>回溯数据时，数据不平滑，会出现跳变。配合watermark 限速可以缓解这个问题。</li>
+<li>分维度的累计值和总维度的累计值不相同的各种问题（见问题4）。</li>
+</ol>
+<p>注意：在稀疏流的场景下，选择基于 rowtime 的 early fire 机制，某些并发上可能没有数据，导致作业整体的watermark 不前进，影响数据产出的实时性。比如在每天凌晨业务低峰期，数据量相对较少，不能保证每个并发上都有数据，作业整体 watermark 不推进，反应在用户的数据曲线上就是虽然墙上时钟已经推进到 4:00，但是看到的最新的一个时间点是 3:00。这种特殊场景，依然推荐用户沿用基于process time 的 early fire。</p>
+<h2 id="缺陷3-看板实时维度加和与汇总不一致"><a href="#缺陷3-看板实时维度加和与汇总不一致" class="headerlink" title="缺陷3:看板实时维度加和与汇总不一致"></a>缺陷3:看板实时维度加和与汇总不一致</h2><h3 id="问题描述-2"><a href="#问题描述-2" class="headerlink" title="问题描述"></a>问题描述</h3><p>用户反馈这种方案看板实时维度累积值加和与汇总累积值不一致。Early fire 用于在窗口结束前以固定周期把中间结果发给下游，发出去的结果和触发的时机没有严格的对应关系。基于 Early fire 机制，只能保证一天窗口结束的时候，发出来的数据分维度上汇总值加和等于总的汇总值。并不能做到看板上各个时间点分维度的汇总值求和等于总的汇总值。主要有两个原因导致：</p>
+<ol>
+<li><p>各个并发触发的时间是不对齐且不确定的</p>
+</li>
+<li><p>max(ts) 的结果作为看板的时间戳，每个max(ts) 时间点对应的 sum(num) 值，并不保证表示这个时间点及以前的所有累计值，可能有部分这个业务时间上发生的数据打到后面的时间戳上。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> </span><br><span class="line"> type, <span class="built_in">sum</span>(num), <span class="built_in">max</span>(ts)</span><br><span class="line"><span class="keyword">FROM</span> T <span class="keyword">GROUP</span> <span class="keyword">BY</span> type, TUMBLE(ts, <span class="type">INTERVAL</span> <span class="string">&#x27;1&#x27;</span> <span class="keyword">DAY</span>)</span><br><span class="line"><span class="keyword">UNION</span> <span class="keyword">ALL</span></span><br><span class="line"><span class="keyword">SELECT</span> </span><br><span class="line"> <span class="string">&#x27;ALL&#x27;</span>, <span class="built_in">sum</span>(num), <span class="built_in">max</span>(ts)</span><br><span class="line"><span class="keyword">FROM</span> T <span class="keyword">GROUP</span> <span class="keyword">BY</span> TUMBLE(ts, <span class="type">INTERVAL</span> <span class="string">&#x27;1&#x27;</span> <span class="keyword">DAY</span>)</span><br></pre></td></tr></table></figure></li>
+</ol>
+<p>以如下SQL 来详细分析。<br>输入数据<br>数据到达机器时间-&gt; ts, type, num<br>00:01:01 -&gt; 00:01:00,A,10<br>00:01:20 -&gt; 00:01:15,A,5<br>00:02:10 -&gt; 00:02:01,A,5</p>
+<p>输出结果<br>计算分维度的作业上，A 所在的并发上 timer 的触发时间是 XX:XX:12，<br>触发时间 -&gt; type, sum(num),max(ts)<br>00:01:12 -&gt; A,10,00:01:00<br>00:02:12 -&gt; A,20,00:02:01</p>
+<p>计算总维度的作业上，timer 触发时间是 XX:XX:23<br>触发时间 00:01:23 -&gt; ALL,15,00:01:15<br>触发时间 00:02:23 -&gt; ALL,20, 00:02:01<br>在看板上观测到的效果是 00:01 这分钟，A对应的累计值10 != ALL 对应的累计值 15。</p>
+<h3 id="临时解决方案-2"><a href="#临时解决方案-2" class="headerlink" title="临时解决方案"></a>临时解决方案</h3><p>把维度列的累积值拍平到多列上，输出的时候用UDTF把一行上多个累积值转成多行。<br>该方案有以下缺点：<br>（1）不能处理维度列不能枚举的Case<br>（2）增加了用户的开发成本：SQL 变长，而且需要开发 UDTF。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> TMP.<span class="operator">*</span> <span class="keyword">FROM</span></span><br><span class="line">(</span><br><span class="line">  <span class="comment">-- 各个维度的指标拍到多列上</span></span><br><span class="line">  <span class="keyword">SELECT</span> </span><br><span class="line">    <span class="built_in">sum</span>(num) <span class="keyword">filter</span> (<span class="keyword">WHERE</span> type <span class="operator">=</span> <span class="string">&#x27;A&#x27;</span>) <span class="keyword">AS</span> sum_A, </span><br><span class="line">    <span class="built_in">sum</span>(num) <span class="keyword">filter</span> (<span class="keyword">WHERE</span> type <span class="operator">=</span> <span class="string">&#x27;B&#x27;</span>) <span class="keyword">AS</span> sum_B,</span><br><span class="line">    <span class="built_in">sum</span>(num) <span class="keyword">AS</span> sum_ALL, </span><br><span class="line">    <span class="built_in">max</span>(ts) <span class="keyword">AS</span> max_timestamp</span><br><span class="line">  <span class="keyword">FROM</span> T <span class="keyword">GROUP</span> <span class="keyword">BY</span> TUMBLE(ts, <span class="type">INTERVAL</span> <span class="string">&#x27;1&#x27;</span> <span class="keyword">DAY</span>)</span><br><span class="line">) T1, <span class="keyword">LATERAL</span> <span class="keyword">TABLE</span>(</span><br><span class="line">  <span class="comment">-- toMultipleRow 做一行转多行的转换</span></span><br><span class="line">   toMultipleRow(sum_A, sum_B, sum_ALL, max_timestamp))</span><br><span class="line">   <span class="keyword">AS</span> TMP(</span><br><span class="line">     type, </span><br><span class="line">     sum_val,</span><br><span class="line">     max_timestamp)</span><br></pre></td></tr></table></figure>
+
+<p>toMultipleRow 对应的 UDTF 代码示例</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">import</span> org.apache.flink.api.common.typeinfo.TypeInformation;</span><br><span class="line"><span class="keyword">import</span> org.apache.flink.api.common.typeinfo.Types;</span><br><span class="line"><span class="keyword">import</span> org.apache.flink.api.java.typeutils.RowTypeInfo;</span><br><span class="line"><span class="keyword">import</span> org.apache.flink.table.functions.TableFunction;</span><br><span class="line"><span class="keyword">import</span> org.apache.flink.types.Row;</span><br><span class="line"></span><br><span class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">MultipleRowConverter</span> <span class="keyword">extends</span> <span class="title">TableFunction</span>&lt;<span class="title">Row</span>&gt; </span>&#123;</span><br><span class="line"></span><br><span class="line">  </span><br><span class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">eval</span><span class="params">(Long sumA, Long sumB, Long sumAll, Long maxTimestamp)</span> </span>&#123;</span><br><span class="line">      <span class="comment">// 拆成三行</span></span><br><span class="line">        collect(Row.of(<span class="string">&quot;A&quot;</span>, sumA, maxTimestamp));</span><br><span class="line">        collect(Row.of(<span class="string">&quot;B&quot;</span>, sumB, maxTimestamp));</span><br><span class="line">        collect(Row.of(<span class="string">&quot;ALL&quot;</span>, sumAll, maxTimestamp));</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="meta">@Override</span></span><br><span class="line">    <span class="function"><span class="keyword">public</span> TypeInformation&lt;Row&gt; <span class="title">getResultType</span><span class="params">()</span> </span>&#123;</span><br><span class="line">      <span class="comment">// 定义输出行的 Schema</span></span><br><span class="line">        <span class="keyword">return</span> <span class="keyword">new</span> RowTypeInfo(Types.STRING, Types.LONG, Types.LONG);</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<h1 id="终极解决方案：Cumulate-Window-方案"><a href="#终极解决方案：Cumulate-Window-方案" class="headerlink" title="终极解决方案：Cumulate Window 方案"></a>终极解决方案：Cumulate Window 方案</h1><p>为了彻底解决 Early fire 的痛点，引入新方案 Cumualate Window 方案，即开渐进式窗口，即[00:00<del>00:01],[00:00</del>00:02].. 这种窗口。这种方案可以一举解决老方案上面提到的所有问题。</p>
+<p>注意，Flink 开源版本里， <a target="_blank" rel="noopener" href="https://ci.apache.org/projects/flink/flink-docs-master/docs/dev/table/sql/queries/window-tvf/#cumulate">Cumulate Window</a> 是在  1.13 版本才开始支持，且只支持 Window Aggregate，老的 Group Window Aggregate 暂时不支持。</p>
+<p>下面会分析 Cumualate Window 方案可以一举解决这些问题。</p>
+<h2 id="Cumulate-Window-为何能避免老方案的三个缺陷"><a href="#Cumulate-Window-为何能避免老方案的三个缺陷" class="headerlink" title="Cumulate Window 为何能避免老方案的三个缺陷"></a>Cumulate Window 为何能避免老方案的三个缺陷</h2><h3 id="输出Append-流而不是-Retract-流解决缺陷1-自增指标曲线有凹坑"><a href="#输出Append-流而不是-Retract-流解决缺陷1-自增指标曲线有凹坑" class="headerlink" title="输出Append 流而不是 Retract 流解决缺陷1:自增指标曲线有凹坑"></a>输出Append 流而不是 Retract 流解决缺陷1:自增指标曲线有凹坑</h3><p>Cumulate Window 算子输出流是 Append 流，而不再是 Update 流，因此避免了该问题。<br>注意：虽然该方案解决了窗口聚合里曲线掉坑的问题，但是不能解决无限流聚合里的曲线掉坑问题。无限流聚合场景下的曲线掉坑问题的根本解决方案是完善 retraction 机制，把 update before 消息和 update after 消息作为一个原子消息发送和处理。PS：目前这个优先级不高因为于无限流聚合不好回溯历史数据，且failover时曲线会有跳变，一般需要曲线看板类的需求都使用窗口聚合。</p>
+<h3 id="数据按照rowtime进行严格窗口划分解决缺陷2-当天累计UV-PV类曲线作业的不可回溯"><a href="#数据按照rowtime进行严格窗口划分解决缺陷2-当天累计UV-PV类曲线作业的不可回溯" class="headerlink" title="数据按照rowtime进行严格窗口划分解决缺陷2:当天累计UV/PV类曲线作业的不可回溯"></a>数据按照rowtime进行严格窗口划分解决缺陷2:当天累计UV/PV类曲线作业的不可回溯</h3><p>Cumulate Window 算子的触发时机是确定的，每个并发都是在 Watermark 越过每分钟窗口的时间阈值时触发一次，输出当前窗口的最终累计结果，而不再一分钟的中间多次输出。且采用窗口的 EndTime 作为看板上的打点时间戳，这个方案可以保证曲线的可回溯性。</p>
+<h3 id="窗口触发时间确定解决缺陷3-看板实时维度加和与汇总不一致"><a href="#窗口触发时间确定解决缺陷3-看板实时维度加和与汇总不一致" class="headerlink" title="窗口触发时间确定解决缺陷3:看板实时维度加和与汇总不一致"></a>窗口触发时间确定解决缺陷3:看板实时维度加和与汇总不一致</h3><p>由于按分钟打点当天累计UV/PV类的需求都使用 Cumulate Window 方案，输出当前窗口的最终累计结果，而不再一分钟的中间多次输出。且采用窗口的 EndTime 作为看板上的打点时间戳。因此不需要用户修改 SQL 就可以解决该问题。</p>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/Window-Aggregate/" rel="tag"># Window Aggregate</a>
+              <a href="/tags/Flink/" rel="tag"># Flink</a>
+              <a href="/tags/Flink-SQL/" rel="tag"># Flink SQL</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item"></div>
+      <div class="post-nav-item">
+    <a href="/lookup-join-code-reader/" rel="next" title="维表 JOIN 的原理介绍及源码剖析">
+      维表 JOIN 的原理介绍及源码剖析 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let { activeClass } = CONFIG.comments;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          Table of Contents
+        </li>
+        <li class="sidebar-nav-overview">
+          Overview
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#%E5%89%8D%E8%A8%80"><span class="nav-number">1.</span> <span class="nav-text">前言</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#%E8%83%8C%E6%99%AF"><span class="nav-number">2.</span> <span class="nav-text">背景</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#Early-fire-%E6%96%B9%E6%A1%88%E7%BC%BA%E7%82%B9%E5%89%96%E6%9E%90%E5%8F%8A%E4%B8%B4%E6%97%B6%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88"><span class="nav-number">3.</span> <span class="nav-text">Early fire 方案缺点剖析及临时解决方案</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#%E7%BC%BA%E9%99%B71-%E8%87%AA%E5%A2%9E%E6%8C%87%E6%A0%87%E6%9B%B2%E7%BA%BF%E6%9C%89%E5%87%B9%E5%9D%91"><span class="nav-number">3.1.</span> <span class="nav-text">缺陷1:自增指标曲线有凹坑</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E9%97%AE%E9%A2%98%E6%8F%8F%E8%BF%B0"><span class="nav-number">3.1.1.</span> <span class="nav-text">问题描述</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E4%B8%B4%E6%97%B6%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88"><span class="nav-number">3.1.2.</span> <span class="nav-text">临时解决方案</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E7%BC%BA%E9%99%B72-%E5%BD%93%E5%A4%A9%E7%B4%AF%E8%AE%A1UV-PV%E7%B1%BB%E6%9B%B2%E7%BA%BF%E4%BD%9C%E4%B8%9A%E7%9A%84%E4%B8%8D%E5%8F%AF%E5%9B%9E%E6%BA%AF"><span class="nav-number">3.2.</span> <span class="nav-text">缺陷2:当天累计UV&#x2F;PV类曲线作业的不可回溯</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E9%97%AE%E9%A2%98%E6%8F%8F%E8%BF%B0-1"><span class="nav-number">3.2.1.</span> <span class="nav-text">问题描述</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E4%B8%B4%E6%97%B6%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88-1"><span class="nav-number">3.2.2.</span> <span class="nav-text">临时解决方案</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E7%BC%BA%E9%99%B73-%E7%9C%8B%E6%9D%BF%E5%AE%9E%E6%97%B6%E7%BB%B4%E5%BA%A6%E5%8A%A0%E5%92%8C%E4%B8%8E%E6%B1%87%E6%80%BB%E4%B8%8D%E4%B8%80%E8%87%B4"><span class="nav-number">3.3.</span> <span class="nav-text">缺陷3:看板实时维度加和与汇总不一致</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E9%97%AE%E9%A2%98%E6%8F%8F%E8%BF%B0-2"><span class="nav-number">3.3.1.</span> <span class="nav-text">问题描述</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E4%B8%B4%E6%97%B6%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88-2"><span class="nav-number">3.3.2.</span> <span class="nav-text">临时解决方案</span></a></li></ol></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#%E7%BB%88%E6%9E%81%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88%EF%BC%9ACumulate-Window-%E6%96%B9%E6%A1%88"><span class="nav-number">4.</span> <span class="nav-text">终极解决方案：Cumulate Window 方案</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#Cumulate-Window-%E4%B8%BA%E4%BD%95%E8%83%BD%E9%81%BF%E5%85%8D%E8%80%81%E6%96%B9%E6%A1%88%E7%9A%84%E4%B8%89%E4%B8%AA%E7%BC%BA%E9%99%B7"><span class="nav-number">4.1.</span> <span class="nav-text">Cumulate Window 为何能避免老方案的三个缺陷</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E8%BE%93%E5%87%BAAppend-%E6%B5%81%E8%80%8C%E4%B8%8D%E6%98%AF-Retract-%E6%B5%81%E8%A7%A3%E5%86%B3%E7%BC%BA%E9%99%B71-%E8%87%AA%E5%A2%9E%E6%8C%87%E6%A0%87%E6%9B%B2%E7%BA%BF%E6%9C%89%E5%87%B9%E5%9D%91"><span class="nav-number">4.1.1.</span> <span class="nav-text">输出Append 流而不是 Retract 流解决缺陷1:自增指标曲线有凹坑</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E6%95%B0%E6%8D%AE%E6%8C%89%E7%85%A7rowtime%E8%BF%9B%E8%A1%8C%E4%B8%A5%E6%A0%BC%E7%AA%97%E5%8F%A3%E5%88%92%E5%88%86%E8%A7%A3%E5%86%B3%E7%BC%BA%E9%99%B72-%E5%BD%93%E5%A4%A9%E7%B4%AF%E8%AE%A1UV-PV%E7%B1%BB%E6%9B%B2%E7%BA%BF%E4%BD%9C%E4%B8%9A%E7%9A%84%E4%B8%8D%E5%8F%AF%E5%9B%9E%E6%BA%AF"><span class="nav-number">4.1.2.</span> <span class="nav-text">数据按照rowtime进行严格窗口划分解决缺陷2:当天累计UV&#x2F;PV类曲线作业的不可回溯</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E7%AA%97%E5%8F%A3%E8%A7%A6%E5%8F%91%E6%97%B6%E9%97%B4%E7%A1%AE%E5%AE%9A%E8%A7%A3%E5%86%B3%E7%BC%BA%E9%99%B73-%E7%9C%8B%E6%9D%BF%E5%AE%9E%E6%97%B6%E7%BB%B4%E5%BA%A6%E5%8A%A0%E5%92%8C%E4%B8%8E%E6%B1%87%E6%80%BB%E4%B8%8D%E4%B8%80%E8%87%B4"><span class="nav-number">4.1.3.</span> <span class="nav-text">窗口触发时间确定解决缺陷3:看板实时维度加和与汇总不一致</span></a></li></ol></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">张静</p>
+  <div class="site-description" itemprop="description"></div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">3</span>
+          <span class="site-state-item-name">posts</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-tags">
+        <span class="site-state-item-count">4</span>
+        <span class="site-state-item-name">tags</span>
+      </div>
+  </nav>
+</div>
+  <div class="links-of-author motion-element">
+      <span class="links-of-author-item">
+        <a href="https://github.com/beyond1920" title="GitHub → https:&#x2F;&#x2F;github.com&#x2F;beyond1920" rel="noopener" target="_blank"><i class="fab fa-github fa-fw"></i>GitHub</a>
+      </span>
+      <span class="links-of-author-item">
+        <a href="mailto:beyond1920@gmail.com" title="E-Mail → mailto:beyond1920@gmail.com" rel="noopener" target="_blank"><i class="fa fa-envelope fa-fw"></i>E-Mail</a>
+      </span>
+  </div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2021</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">张静</span>
+</div>
+  <div class="powered-by">Powered by <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> & <a href="https://muse.theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Muse</a>
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+
+<script src="/js/utils.js"></script>
+
+<script src="/js/motion.js"></script>
+
+
+<script src="/js/schemes/muse.js"></script>
+
+
+<script src="/js/next-boot.js"></script>
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+  <script src="//cdn.jsdelivr.net/npm/quicklink@1/dist/quicklink.umd.js"></script>
+  <script>
+      window.addEventListener('load', () => {
+      quicklink({
+        timeout : 3000,
+        priority: true,
+        ignores : [uri => uri.includes('#'),uri => uri === 'https://flink.wjh.me/day-acc-solution/',]
+      });
+      });
+  </script>
+
+</body>
+</html>
