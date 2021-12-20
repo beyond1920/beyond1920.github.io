@@ -33,7 +33,7 @@
 <meta property="og:image" content="https://static.yximgs.com/udata/pkg/EE-KSTACK/8eda9b04aefbb4859dc0482e1cdee0d4.png">
 <meta property="og:image" content="https://static.yximgs.com/udata/pkg/EE-KSTACK/08516102222742e4ad84e520ea21bb74.png">
 <meta property="article:published_time" content="2021-12-14T14:30:00.000Z">
-<meta property="article:modified_time" content="2021-12-14T11:45:17.625Z">
+<meta property="article:modified_time" content="2021-12-20T13:41:06.275Z">
 <meta property="article:author" content="张静">
 <meta property="article:tag" content="Flink">
 <meta property="article:tag" content="Flink SQL">
@@ -191,10 +191,16 @@
                 <i class="far fa-calendar"></i>
               </span>
               <span class="post-meta-item-text">Posted on</span>
-              
 
-              <time title="Created: 2021-12-14 22:30:00 / Modified: 19:45:17" itemprop="dateCreated datePublished" datetime="2021-12-14T22:30:00+08:00">2021-12-14</time>
+              <time title="Created: 2021-12-14 22:30:00" itemprop="dateCreated datePublished" datetime="2021-12-14T22:30:00+08:00">2021-12-14</time>
             </span>
+              <span class="post-meta-item">
+                <span class="post-meta-item-icon">
+                  <i class="far fa-calendar-check"></i>
+                </span>
+                <span class="post-meta-item-text">Edited on</span>
+                <time title="Modified: 2021-12-20 21:41:06" itemprop="dateModified" datetime="2021-12-20T21:41:06+08:00">2021-12-20</time>
+              </span>
 
           
 
@@ -236,7 +242,7 @@
 <h2 id="UpdateFastRankFunction"><a href="#UpdateFastRankFunction" class="headerlink" title="UpdateFastRankFunction"></a>UpdateFastRankFunction</h2><h3 id="内存-Cache-的设计-1"><a href="#内存-Cache-的设计-1" class="headerlink" title="内存 Cache 的设计"></a>内存 Cache 的设计</h3><p>内存 Cache 里缓存了各个 Partition Key 下 TopN 数据。<br>数据结构是一个 LRUMap，Key 是 Partition Key，Value 是该 Partition Key 下 TopN 的数据（是个 Map，Key 是 Primary Key， Value 是 Record），对应到 State的数据在内存里的缓存。</p>
 <p>另外，为了提高读写效率，内存里还维护了相同数据的另外一份表现形式，Key 是 PartitionKey，Value 是 TopNBuffer（Key 是 SortKey，Value 是 Records的 Primary Key 列表）。</p>
 <h3 id="State-设计-1"><a href="#State-设计-1" class="headerlink" title="State 设计"></a>State 设计</h3><h4 id="存储的内容-1"><a href="#存储的内容-1" class="headerlink" title="存储的内容"></a>存储的内容</h4><p>存储 TopN 记录即可，不需要存储所有的数据</p>
-<h4 id="存储格式-1"><a href="#存储格式-1" class="headerlink" title="存储格式"></a>存储格式</h4><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">MapState&lt;RowData, Tuple2&lt;RowData, Integer&gt;&gt;  (Key是 rowkey， Value 是Tuple2.of(record, index in the list of same sort key)。</span><br></pre></td></tr></table></figure>
+<h4 id="存储格式-1"><a href="#存储格式-1" class="headerlink" title="存储格式"></a>存储格式</h4><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">MapState&lt;RowData, Tuple2&lt;RowData, Integer&gt;&gt; <span class="comment">// (Key是 rowkey， Value 是Tuple2.of(record, index in the list of same sort key)。</span></span><br></pre></td></tr></table></figure>
 
 <h4 id="State-读写时机-1"><a href="#State-读写时机-1" class="headerlink" title="State 读写时机"></a>State 读写时机</h4><p> 平时和Cache 交互，只在下面三种情况才和 State 交互</p>
 <ol>
@@ -247,7 +253,7 @@
 <h3 id="处理流程-1"><a href="#处理流程-1" class="headerlink" title="处理流程"></a>处理流程</h3><p> <img src="https://static.yximgs.com/udata/pkg/EE-KSTACK/8eda9b04aefbb4859dc0482e1cdee0d4.png" alt="4"></p>
 <h2 id="RetractableTopNFunction"><a href="#RetractableTopNFunction" class="headerlink" title="RetractableTopNFunction"></a>RetractableTopNFunction</h2><h3 id="内存-Cache-设计"><a href="#内存-Cache-设计" class="headerlink" title="内存 Cache 设计"></a>内存 Cache 设计</h3><p>无 Cache</p>
 <h3 id="State-设计-2"><a href="#State-设计-2" class="headerlink" title="State 设计"></a>State 设计</h3><h4 id="存储的内容-2"><a href="#存储的内容-2" class="headerlink" title="存储的内容"></a>存储的内容</h4><p>存储了所有的输入数据</p>
-<h4 id="存储格式-2"><a href="#存储格式-2" class="headerlink" title="存储格式"></a>存储格式</h4><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">1. MapState&lt;RowData, List&lt;RowData&gt;&gt;(Key 是 SortKey，Value 是 Records 列表）</span><br><span class="line">2. ValueState&lt;SortedMap&lt;RowData, Long&gt; （Key 是 SortKey，Value 是 Records记录条数），用处是尽量减少 State 访问。缺点是两个State 的 TTL可能不同步</span><br></pre></td></tr></table></figure>
+<h4 id="存储格式-2"><a href="#存储格式-2" class="headerlink" title="存储格式"></a>存储格式</h4><figure class="highlight java"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="number">1.</span> MapState&lt;RowData, List&lt;RowData&gt;&gt; <span class="comment">// (Key 是 SortKey，Value 是 Records 列表）</span></span><br><span class="line"><span class="number">2.</span> ValueState&lt;SortedMap&lt;RowData, Long&gt; <span class="comment">//（Key 是 SortKey，Value 是 Records记录条数），用处是尽量减少 State 访问。缺点是两个State 的 TTL可能不同步</span></span><br></pre></td></tr></table></figure>
 
 <h4 id="State-读写时机-2"><a href="#State-读写时机-2" class="headerlink" title="State 读写时机"></a>State 读写时机</h4><p>Per Record 和 State 交互。</p>
 <h3 id="处理流程-2"><a href="#处理流程-2" class="headerlink" title="处理流程"></a>处理流程</h3><p><img src="https://static.yximgs.com/udata/pkg/EE-KSTACK/08516102222742e4ad84e520ea21bb74.png" alt="5"></p>
