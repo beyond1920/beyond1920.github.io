@@ -29,7 +29,7 @@
 <meta property="og:locale" content="en_US">
 <meta property="og:image" content="https://beyond1920.github.io/window-watermark-state/window-watermark-state.assets/image-20211214184246043.png">
 <meta property="article:published_time" content="2021-12-14T13:43:06.000Z">
-<meta property="article:modified_time" content="2021-12-14T11:07:08.073Z">
+<meta property="article:modified_time" content="2021-12-20T13:50:20.682Z">
 <meta property="article:author" content="张静">
 <meta property="article:tag" content="Window Aggregate">
 <meta property="article:tag" content="Flink">
@@ -187,10 +187,16 @@
                 <i class="far fa-calendar"></i>
               </span>
               <span class="post-meta-item-text">Posted on</span>
-              
 
-              <time title="Created: 2021-12-14 21:43:06 / Modified: 19:07:08" itemprop="dateCreated datePublished" datetime="2021-12-14T21:43:06+08:00">2021-12-14</time>
+              <time title="Created: 2021-12-14 21:43:06" itemprop="dateCreated datePublished" datetime="2021-12-14T21:43:06+08:00">2021-12-14</time>
             </span>
+              <span class="post-meta-item">
+                <span class="post-meta-item-icon">
+                  <i class="far fa-calendar-check"></i>
+                </span>
+                <span class="post-meta-item-text">Edited on</span>
+                <time title="Modified: 2021-12-20 21:50:20" itemprop="dateModified" datetime="2021-12-20T21:50:20+08:00">2021-12-20</time>
+              </span>
 
           
 
@@ -215,7 +221,8 @@
 </ol>
 <p>下面分别说明这两个原因。</p>
 <h2 id="CUMULATE-WINDOW-聚合算子对迟到数据的处理方式"><a href="#CUMULATE-WINDOW-聚合算子对迟到数据的处理方式" class="headerlink" title="CUMULATE WINDOW 聚合算子对迟到数据的处理方式"></a>CUMULATE WINDOW 聚合算子对迟到数据的处理方式</h2><p>目前 Cumulate Window Aggregate 对迟到数据的处理方式是判断该数据所属的大窗口是否已经迟到，如果大窗口迟到了，直接丢弃；如果大窗口还没有迟到，把该条数据记录到 merged state 里，不会修正已经发出的窗口数据，但是后续的同属于一个大窗口的结果数据会算上这条记录。</p>
-<p>SELECT window_start, window_end, COUNT(USER_ID)<br>  FROM TABLE(<br>    CUMULATE(TABLE Bid, DESCRIPTOR(bidtime), INTERVAL ‘1’ MINUTES, INTERVAL ‘1’ DAY))<br>  GROUP BY window_start, window_end;</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> window_start, window_end, <span class="built_in">COUNT</span>(USER_ID)</span><br><span class="line">  <span class="keyword">FROM</span> <span class="keyword">TABLE</span>(</span><br><span class="line">    CUMULATE(<span class="keyword">TABLE</span> Bid, DESCRIPTOR(bidtime), <span class="type">INTERVAL</span> <span class="string">&#x27;1&#x27;</span> MINUTES, <span class="type">INTERVAL</span> <span class="string">&#x27;1&#x27;</span> <span class="keyword">DAY</span>))</span><br><span class="line">  <span class="keyword">GROUP</span> <span class="keyword">BY</span> window_start, window_end;</span><br></pre></td></tr></table></figure>
+
 <p>以上面的例子为例，当 watermark 到了 2021-10-11 11:01，往下游发送 [00:00, 11:01) 窗口的结果，比如是 INSERT (00:00, 11:01, 4)。<br>这个时候来了一个迟到数据，event time 是 2021-10-11 11:00，这条数据所属的大窗口还没有迟到，因此直接把该条记录记录到 merged state 里，后续窗口的结果（比如 [00:00, 11:02),[00:00, 11:03)…  ）会算上该条迟到数据，但是不会修正已经发送出去的窗口数据。</p>
 <h2 id="从savepoint-checkpoint-恢复后-Watermark-重建"><a href="#从savepoint-checkpoint-恢复后-Watermark-重建" class="headerlink" title="从savepoint/checkpoint 恢复后 Watermark 重建"></a>从savepoint/checkpoint 恢复后 Watermark 重建</h2><p>目前 FLINK 里，watermark 不会记录到 state 里，从savepoint 和 checkpoint 恢复后，watermark 会发生重建，这会带来一些非预期的行为，比如原本的迟到数据再重启后被当成了非迟到数据。<br>还以上面的例子来说，当 watermark 到了 2021-10-11 11:01，往下游发送 [00:00, 11:01) 窗口的结果，比如是 INSERT (00:00, 11:01, 4)。<br>这个时候做 savepoint，并让作业从 savepoint 重启，由于 watermark 会重建，重建后的 watermark 可能会比重启前的小，尤其是遇到乱序数据时，比如 watermark 可能回退到了11:00，<br>这个时候来了一条数据，event time 是 2021-10-11 11:00。这个数据在重启前会被认为是迟到数据，但是重启后，由于发生了 watermark 重建，该条数据不会被认为是迟到数据，当 watermark 再次到达 11:01 时，会往下游再次发送一条窗口是 [00:00, 11:01] 的结果。<br>因此下游会收到两次 [00:00, 11:01] 窗口的 INSERT 结果。可能会引发数据质量问题，比如外层进行合桶聚合时。</p>
 <h1 id="解决方案"><a href="#解决方案" class="headerlink" title="解决方案"></a>解决方案</h1><p>上面介绍了，该问题的根本原因是受两点原因综合影响：</p>
