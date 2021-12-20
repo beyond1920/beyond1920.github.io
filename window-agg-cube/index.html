@@ -17,13 +17,13 @@
 
 <script id="hexo-configurations">
     var NexT = window.NexT || {};
-    var CONFIG = {"hostname":"flink.wjh.me","root":"/","scheme":"Muse","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":false,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}};
+    var CONFIG = {"hostname":"beyond1920.github.io","root":"/","scheme":"Muse","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":false,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}};
   </script>
 
   <meta name="description" content="前言本文是 Flink SQL 系列中的一篇，更多文章请关注Flink SQL 系列文档。内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。 进入正题Flink SQL 里提供窗口聚合的功能，开源 Flink 1.13 版本之前窗口聚合的需求采用 Group Window Aggregate 语法表示。在 1.13 版本引入 Window TVF 的概念，官方推荐窗口聚合的需求尽">
 <meta property="og:type" content="article">
 <meta property="og:title" content="窗口聚合支持多维分析">
-<meta property="og:url" content="https://flink.wjh.me/window-agg-cube/index.html">
+<meta property="og:url" content="https://beyond1920.github.io/window-agg-cube/index.html">
 <meta property="og:site_name" content="张静">
 <meta property="og:description" content="前言本文是 Flink SQL 系列中的一篇，更多文章请关注Flink SQL 系列文档。内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。 进入正题Flink SQL 里提供窗口聚合的功能，开源 Flink 1.13 版本之前窗口聚合的需求采用 Group Window Aggregate 语法表示。在 1.13 版本引入 Window TVF 的概念，官方推荐窗口聚合的需求尽">
 <meta property="og:locale" content="en_US">
@@ -35,7 +35,7 @@
 <meta property="article:tag" content="Flink SQL">
 <meta name="twitter:card" content="summary">
 
-<link rel="canonical" href="https://flink.wjh.me/window-agg-cube/">
+<link rel="canonical" href="https://beyond1920.github.io/window-agg-cube/">
 
 
 <script id="page-configurations">
@@ -163,7 +163,7 @@
   
   
   <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="en">
-    <link itemprop="mainEntityOfPage" href="https://flink.wjh.me/window-agg-cube/">
+    <link itemprop="mainEntityOfPage" href="https://beyond1920.github.io/window-agg-cube/">
 
     <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
       <meta itemprop="image" content="/images/avatar.gif">
@@ -420,7 +420,7 @@
       quicklink({
         timeout : 3000,
         priority: true,
-        ignores : [uri => uri.includes('#'),uri => uri === 'https://flink.wjh.me/window-agg-cube/',]
+        ignores : [uri => uri.includes('#'),uri => uri === 'https://beyond1920.github.io/window-agg-cube/',]
       });
       });
   </script>

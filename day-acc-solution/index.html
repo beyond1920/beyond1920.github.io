@@ -17,20 +17,20 @@
 
 <script id="hexo-configurations">
     var NexT = window.NexT || {};
-    var CONFIG = {"hostname":"flink.wjh.me","root":"/","scheme":"Muse","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":false,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}};
+    var CONFIG = {"hostname":"beyond1920.github.io","root":"/","scheme":"Muse","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":false,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}};
   </script>
 
   <meta name="description" content="前言本文是 Flink SQL 系列中的一篇，更多文章请关注Flink SQL 系列文档。内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。 背景业务上经常有天级别聚合，按分钟打点的需求，比如计算当天的 UV和PV，但是分钟级别打点。目前 Flink 有两种方案来支持这种需求。 老方案是 Early fire 方案，即开天级别 Tumble Window，每分钟触发一次。Earl">
 <meta property="og:type" content="article">
 <meta property="og:title" content="针对天级别聚合且按分钟打点的需求，方案演进之路">
-<meta property="og:url" content="https://flink.wjh.me/day-acc-solution/index.html">
+<meta property="og:url" content="https://beyond1920.github.io/day-acc-solution/index.html">
 <meta property="og:site_name" content="张静">
 <meta property="og:description" content="前言本文是 Flink SQL 系列中的一篇，更多文章请关注Flink SQL 系列文档。内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。 背景业务上经常有天级别聚合，按分钟打点的需求，比如计算当天的 UV和PV，但是分钟级别打点。目前 Flink 有两种方案来支持这种需求。 老方案是 Early fire 方案，即开天级别 Tumble Window，每分钟触发一次。Earl">
 <meta property="og:locale" content="en_US">
-<meta property="og:image" content="https://flink.wjh.me/day-acc-solution/c2e4c356f99e4fedc954df39c2fbadfe-20210911173210938.png">
-<meta property="og:image" content="https://flink.wjh.me/day-acc-solution/213cc7ac62e07e36778294528cebb66a-20210911173210959.png">
-<meta property="og:image" content="https://flink.wjh.me/day-acc-solution/d74ace772931300fe7ab7a27b0fc1774-20210911173211011.png">
-<meta property="og:image" content="https://flink.wjh.me/day-acc-solution/3c2699738f5a96677e7c1ec79f4e0731-20210911173210824.png">
+<meta property="og:image" content="https://beyond1920.github.io/day-acc-solution/c2e4c356f99e4fedc954df39c2fbadfe-20210911173210938.png">
+<meta property="og:image" content="https://beyond1920.github.io/day-acc-solution/213cc7ac62e07e36778294528cebb66a-20210911173210959.png">
+<meta property="og:image" content="https://beyond1920.github.io/day-acc-solution/d74ace772931300fe7ab7a27b0fc1774-20210911173211011.png">
+<meta property="og:image" content="https://beyond1920.github.io/day-acc-solution/3c2699738f5a96677e7c1ec79f4e0731-20210911173210824.png">
 <meta property="article:published_time" content="2021-09-11T10:43:06.000Z">
 <meta property="article:modified_time" content="2021-09-11T14:08:00.836Z">
 <meta property="article:author" content="张静">
@@ -38,9 +38,9 @@
 <meta property="article:tag" content="Flink">
 <meta property="article:tag" content="Flink SQL">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:image" content="https://flink.wjh.me/day-acc-solution/c2e4c356f99e4fedc954df39c2fbadfe-20210911173210938.png">
+<meta name="twitter:image" content="https://beyond1920.github.io/day-acc-solution/c2e4c356f99e4fedc954df39c2fbadfe-20210911173210938.png">
 
-<link rel="canonical" href="https://flink.wjh.me/day-acc-solution/">
+<link rel="canonical" href="https://beyond1920.github.io/day-acc-solution/">
 
 
 <script id="page-configurations">
@@ -168,7 +168,7 @@
   
   
   <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="en">
-    <link itemprop="mainEntityOfPage" href="https://flink.wjh.me/day-acc-solution/">
+    <link itemprop="mainEntityOfPage" href="https://beyond1920.github.io/day-acc-solution/">
 
     <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
       <meta itemprop="image" content="/images/avatar.gif">
@@ -469,7 +469,7 @@
       quicklink({
         timeout : 3000,
         priority: true,
-        ignores : [uri => uri.includes('#'),uri => uri === 'https://flink.wjh.me/day-acc-solution/',]
+        ignores : [uri => uri.includes('#'),uri => uri === 'https://beyond1920.github.io/day-acc-solution/',]
       });
       });
   </script>
