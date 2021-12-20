@@ -20,25 +20,21 @@
     var CONFIG = {"hostname":"flink.wjh.me","root":"/","scheme":"Muse","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":false,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}};
   </script>
 
-  <meta name="description" content="前言本文是 Flink SQL 系列中的一篇，更多文章请关注Flink SQL 系列文档。内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。 原理梳理LookupJoin 根据获取维表数据的方式是同步获取还是异步获取分为两种实现。同步的实现基于 ProcessOperator，异步的实现基于 AsyncWaitOperator。 Sync LookupJoin对于同步的 Look">
+  <meta name="description" content="前言本文是 Flink SQL 系列中的一篇，更多文章请关注Flink SQL 系列文档。内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。 如何在 UDF 里读取自定义的参数第一步：定义参数 pipeline.global-job-parameters在FLINK 作业的 YAML 文件里加入参数: pipeline.global-job-parameters 1pipelin">
 <meta property="og:type" content="article">
-<meta property="og:title" content="维表 JOIN 的原理介绍及源码剖析">
-<meta property="og:url" content="https://flink.wjh.me/lookup-join-code-reader/index.html">
+<meta property="og:title" content="如何在 UDF 里读取自定义的参数值">
+<meta property="og:url" content="https://flink.wjh.me/read-user-conf/index.html">
 <meta property="og:site_name" content="张静">
-<meta property="og:description" content="前言本文是 Flink SQL 系列中的一篇，更多文章请关注Flink SQL 系列文档。内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。 原理梳理LookupJoin 根据获取维表数据的方式是同步获取还是异步获取分为两种实现。同步的实现基于 ProcessOperator，异步的实现基于 AsyncWaitOperator。 Sync LookupJoin对于同步的 Look">
+<meta property="og:description" content="前言本文是 Flink SQL 系列中的一篇，更多文章请关注Flink SQL 系列文档。内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。 如何在 UDF 里读取自定义的参数第一步：定义参数 pipeline.global-job-parameters在FLINK 作业的 YAML 文件里加入参数: pipeline.global-job-parameters 1pipelin">
 <meta property="og:locale" content="en_US">
-<meta property="og:image" content="https://flink.wjh.me/lookup-join-code-reader/144d183cefd8bb5a60b9f36820bcb31a.png">
-<meta property="og:image" content="https://flink.wjh.me/lookup-join-code-reader/8f56c8da7237f5c6f561d38a96bf67f1.png">
-<meta property="article:published_time" content="2021-09-11T10:43:34.000Z">
-<meta property="article:modified_time" content="2021-09-11T14:28:40.480Z">
+<meta property="article:published_time" content="2021-12-14T14:00:00.000Z">
+<meta property="article:modified_time" content="2021-12-14T11:40:29.681Z">
 <meta property="article:author" content="张静">
-<meta property="article:tag" content="Join">
 <meta property="article:tag" content="Flink">
 <meta property="article:tag" content="Flink SQL">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:image" content="https://flink.wjh.me/lookup-join-code-reader/144d183cefd8bb5a60b9f36820bcb31a.png">
 
-<link rel="canonical" href="https://flink.wjh.me/lookup-join-code-reader/">
+<link rel="canonical" href="https://flink.wjh.me/read-user-conf/">
 
 
 <script id="page-configurations">
@@ -51,7 +47,7 @@
   };
 </script>
 
-  <title>维表 JOIN 的原理介绍及源码剖析 | 张静</title>
+  <title>如何在 UDF 里读取自定义的参数值 | 张静</title>
   
 
 
@@ -166,7 +162,7 @@
   
   
   <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="en">
-    <link itemprop="mainEntityOfPage" href="https://flink.wjh.me/lookup-join-code-reader/">
+    <link itemprop="mainEntityOfPage" href="https://flink.wjh.me/read-user-conf/">
 
     <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
       <meta itemprop="image" content="/images/avatar.gif">
@@ -179,7 +175,7 @@
     </span>
       <header class="post-header">
         <h1 class="post-title" itemprop="name headline">
-          维表 JOIN 的原理介绍及源码剖析
+          如何在 UDF 里读取自定义的参数值
         </h1>
 
         <div class="post-meta">
@@ -190,7 +186,7 @@
               <span class="post-meta-item-text">Posted on</span>
               
 
-              <time title="Created: 2021-09-11 18:43:34 / Modified: 22:28:40" itemprop="dateCreated datePublished" datetime="2021-09-11T18:43:34+08:00">2021-09-11</time>
+              <time title="Created: 2021-12-14 22:00:00 / Modified: 19:40:29" itemprop="dateCreated datePublished" datetime="2021-12-14T22:00:00+08:00">2021-12-14</time>
             </span>
 
           
@@ -205,21 +201,15 @@
 
       
         <h1 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h1><p>本文是 Flink SQL 系列中的一篇，更多文章请关注<a href="/">Flink SQL 系列文档</a>。<br>内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。</p>
-<h1 id="原理梳理"><a href="#原理梳理" class="headerlink" title="原理梳理"></a>原理梳理</h1><p>LookupJoin 根据获取维表数据的方式是同步获取还是异步获取分为两种实现。同步的实现基于 ProcessOperator，异步的实现基于 AsyncWaitOperator。</p>
-<h2 id="Sync-LookupJoin"><a href="#Sync-LookupJoin" class="headerlink" title="Sync LookupJoin"></a>Sync LookupJoin</h2><p><img src="144d183cefd8bb5a60b9f36820bcb31a.png" alt="1"><br>对于同步的 LookupJoin 来说，主表一条数据 Record 来了以后，会经过以下几个步骤：</p>
-<ol>
-<li>分析 Record 的 Key，基于 Key 去维表侧获取数据</li>
-<li>如果维表上有 Calc，维表返回的数据需要经过 CalcCollector，做过滤或者列裁剪后才会返回</li>
-<li>如果 JOIN 条件里除了维表上的 LookupKey 还有剩余的关联条件，经过 CodeGen TableFunctionCollector，过滤出满足 Remaing Condition 的数据</li>
-<li>TableFunctionCollector 里关联主表的 Record 和第3步返回的一条或多条维表记录</li>
-</ol>
-<h2 id="Async-LookupJoin"><a href="#Async-LookupJoin" class="headerlink" title="Async LookupJoin"></a>Async LookupJoin</h2><p><img src="8f56c8da7237f5c6f561d38a96bf67f1.png" alt="2"><br>异步的 LookupJoin 和同步的 LookupJoin 最大的区别就是当前主表的数据来了以后，发出异步关联请求后，不需要等请求返回，就可以处理下一条主表的输入数据了。对于异步的 LookupJoin 来说，主表一条数据 Record 来了以后，经过的流程：</p>
-<ol>
-<li>分析 Record 的 Key，向维表发出异步的数据请求后，就可以处理下一条输入数据了</li>
-<li>如果维表上有 Calc，维表返回的数据需要经过 TemporalTableCalcResultFuture，做过滤或者列裁剪后才会返回</li>
-<li>如果 JOIN 条件里除了维表上的 LookupKey 还有剩余的关联条件，经过 CodeGen TableFunctionResultFuture，过滤出满足 Remaing Condition 的数据</li>
-<li>JoinedRowResultFuture 关联主表的 Record 和第3步返回的一条或多条维表记录</li>
-</ol>
+<h1 id="如何在-UDF-里读取自定义的参数"><a href="#如何在-UDF-里读取自定义的参数" class="headerlink" title="如何在 UDF 里读取自定义的参数"></a>如何在 UDF 里读取自定义的参数</h1><h2 id="第一步：定义参数-pipeline-global-job-parameters"><a href="#第一步：定义参数-pipeline-global-job-parameters" class="headerlink" title="第一步：定义参数 pipeline.global-job-parameters"></a>第一步：定义参数 pipeline.global-job-parameters</h2><p>在FLINK 作业的 YAML 文件里加入参数: <code>pipeline.global-job-parameters</code></p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">pipeline.global-job-parameters: k1:v1,k2:v2</span><br></pre></td></tr></table></figure>
+
+<h2 id="第二部：UDF-里定义-open-函数"><a href="#第二部：UDF-里定义-open-函数" class="headerlink" title="第二部：UDF 里定义 open 函数"></a>第二部：UDF 里定义 open 函数</h2><p>假设用户在作业里定义了：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">pipeline.global-job-parameters: int.value:1,fail-for-cached-file:true</span><br></pre></td></tr></table></figure>
+
+<p>Function 里在 open 方法获取自定义的参数值</p>
+<figure class="highlight scala"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">@SerialVersionUID</span>(<span class="number">1</span>L)</span><br><span class="line"><span class="class"><span class="keyword">class</span> <span class="title">RichFunc1</span> <span class="keyword">extends</span> <span class="title">ScalarFunction</span> </span>&#123;</span><br><span class="line">  <span class="keyword">var</span> added: <span class="type">Int</span> = <span class="type">Int</span>.<span class="type">MaxValue</span></span><br><span class="line"></span><br><span class="line">  <span class="keyword">override</span> <span class="function"><span class="keyword">def</span> <span class="title">open</span></span>(context: <span class="type">FunctionContext</span>): <span class="type">Unit</span> = &#123;</span><br><span class="line">    added = context.getJobParameter(<span class="string">&quot;int.value&quot;</span>, <span class="string">&quot;0&quot;</span>).toInt</span><br><span class="line">    <span class="keyword">if</span> (context.getJobParameter(<span class="string">&quot;fail-for-cached-file&quot;</span>, <span class="string">&quot;false&quot;</span>).toBoolean) &#123;</span><br><span class="line">      context.getCachedFile(<span class="string">&quot;FAIL&quot;</span>)</span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line"></span><br><span class="line">  <span class="function"><span class="keyword">def</span> <span class="title">eval</span></span>(index: <span class="type">Int</span>): <span class="type">Int</span> = &#123;</span><br><span class="line">    index + added</span><br><span class="line">  &#125;</span><br><span class="line"></span><br><span class="line">  <span class="keyword">override</span> <span class="function"><span class="keyword">def</span> <span class="title">close</span></span>(): <span class="type">Unit</span> = &#123;</span><br><span class="line">    added = <span class="type">Int</span>.<span class="type">MaxValue</span></span><br><span class="line">  &#125;</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
 
     </div>
 
@@ -229,7 +219,6 @@
 
       <footer class="post-footer">
           <div class="post-tags">
-              <a href="/tags/Join/" rel="tag"># Join</a>
               <a href="/tags/Flink/" rel="tag"># Flink</a>
               <a href="/tags/Flink-SQL/" rel="tag"># Flink SQL</a>
           </div>
@@ -240,12 +229,12 @@
         
     <div class="post-nav">
       <div class="post-nav-item">
-    <a href="/day-acc-solution/" rel="prev" title="针对天级别聚合且按分钟打点的需求，方案演进之路">
-      <i class="fa fa-chevron-left"></i> 针对天级别聚合且按分钟打点的需求，方案演进之路
+    <a href="/window-watermark-state/" rel="prev" title="CUMULATE 窗口聚合计算 UV 时，曲线出现尖刺的问题跟进和解决">
+      <i class="fa fa-chevron-left"></i> CUMULATE 窗口聚合计算 UV 时，曲线出现尖刺的问题跟进和解决
     </a></div>
       <div class="post-nav-item">
-    <a href="/window-agg-cube/" rel="next" title="窗口聚合支持多维分析">
-      窗口聚合支持多维分析 <i class="fa fa-chevron-right"></i>
+    <a href="/topN/" rel="next" title="流式 TopN 原理介绍">
+      流式 TopN 原理介绍 <i class="fa fa-chevron-right"></i>
     </a></div>
     </div>
       </footer>
@@ -305,7 +294,7 @@
 
       <!--noindex-->
       <div class="post-toc-wrap sidebar-panel">
-          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#%E5%89%8D%E8%A8%80"><span class="nav-number">1.</span> <span class="nav-text">前言</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#%E5%8E%9F%E7%90%86%E6%A2%B3%E7%90%86"><span class="nav-number">2.</span> <span class="nav-text">原理梳理</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#Sync-LookupJoin"><span class="nav-number">2.1.</span> <span class="nav-text">Sync LookupJoin</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Async-LookupJoin"><span class="nav-number">2.2.</span> <span class="nav-text">Async LookupJoin</span></a></li></ol></li></ol></div>
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#%E5%89%8D%E8%A8%80"><span class="nav-number">1.</span> <span class="nav-text">前言</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#%E5%A6%82%E4%BD%95%E5%9C%A8-UDF-%E9%87%8C%E8%AF%BB%E5%8F%96%E8%87%AA%E5%AE%9A%E4%B9%89%E7%9A%84%E5%8F%82%E6%95%B0"><span class="nav-number">2.</span> <span class="nav-text">如何在 UDF 里读取自定义的参数</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#%E7%AC%AC%E4%B8%80%E6%AD%A5%EF%BC%9A%E5%AE%9A%E4%B9%89%E5%8F%82%E6%95%B0-pipeline-global-job-parameters"><span class="nav-number">2.1.</span> <span class="nav-text">第一步：定义参数 pipeline.global-job-parameters</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E7%AC%AC%E4%BA%8C%E9%83%A8%EF%BC%9AUDF-%E9%87%8C%E5%AE%9A%E4%B9%89-open-%E5%87%BD%E6%95%B0"><span class="nav-number">2.2.</span> <span class="nav-text">第二部：UDF 里定义 open 函数</span></a></li></ol></li></ol></div>
       </div>
       <!--/noindex-->
 
@@ -424,7 +413,7 @@
       quicklink({
         timeout : 3000,
         priority: true,
-        ignores : [uri => uri.includes('#'),uri => uri === 'https://flink.wjh.me/lookup-join-code-reader/',]
+        ignores : [uri => uri.includes('#'),uri => uri === 'https://flink.wjh.me/read-user-conf/',]
       });
       });
   </script>

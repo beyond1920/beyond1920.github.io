@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 5.4.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/all.min.css">
+
+<script id="hexo-configurations">
+    var NexT = window.NexT || {};
+    var CONFIG = {"hostname":"flink.wjh.me","root":"/","scheme":"Muse","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":false,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}};
+  </script>
+
+  <meta name="description" content="前言本文是 Flink SQL 系列中的一篇，更多文章请关注Flink SQL 系列文档。内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。 背景12345SELECT channel, COUNT(DISTINCT device_id) AS uvFROM source_tableGROUP BY channel 上面的SQL是为了统计一个应用各个频道的UV。 有两个业务特点，">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Distinct MapState 状态复用优化">
+<meta property="og:url" content="https://flink.wjh.me/mapstate-reuse/index.html">
+<meta property="og:site_name" content="张静">
+<meta property="og:description" content="前言本文是 Flink SQL 系列中的一篇，更多文章请关注Flink SQL 系列文档。内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。 背景12345SELECT channel, COUNT(DISTINCT device_id) AS uvFROM source_tableGROUP BY channel 上面的SQL是为了统计一个应用各个频道的UV。 有两个业务特点，">
+<meta property="og:locale" content="en_US">
+<meta property="article:published_time" content="2021-12-14T12:43:06.000Z">
+<meta property="article:modified_time" content="2021-12-14T11:38:11.996Z">
+<meta property="article:author" content="张静">
+<meta property="article:tag" content="Flink">
+<meta property="article:tag" content="Flink SQL">
+<meta property="article:tag" content="状态复用">
+<meta name="twitter:card" content="summary">
+
+<link rel="canonical" href="https://flink.wjh.me/mapstate-reuse/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome : false,
+    isPost : true,
+    lang   : 'en'
+  };
+</script>
+
+  <title>Distinct MapState 状态复用优化 | 张静</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="Toggle navigation bar">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+
+  <div class="site-meta">
+
+    <a href="/" class="brand" rel="start">
+      <span class="logo-line-before"><i></i></span>
+      <h1 class="site-title">张静</h1>
+      <span class="logo-line-after"><i></i></span>
+    </a>
+  </div>
+
+  <div class="site-nav-right">
+    <div class="toggle popup-trigger">
+    </div>
+  </div>
+</div>
+
+
+
+
+<nav class="site-nav">
+  <ul id="menu" class="main-menu menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="home fa-fw"></i>Home</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-user fa-fw"></i>About</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="tags fa-fw"></i>Tags</a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-archive fa-fw"></i>Archives</a>
+
+  </li>
+  </ul>
+</nav>
+
+
+
+
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content post posts-expand">
+            
+
+    
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="en">
+    <link itemprop="mainEntityOfPage" href="https://flink.wjh.me/mapstate-reuse/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="张静">
+      <meta itemprop="description" content="">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="张静">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Distinct MapState 状态复用优化
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-calendar"></i>
+              </span>
+              <span class="post-meta-item-text">Posted on</span>
+              
+
+              <time title="Created: 2021-12-14 20:43:06 / Modified: 19:38:11" itemprop="dateCreated datePublished" datetime="2021-12-14T20:43:06+08:00">2021-12-14</time>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h1><p>本文是 Flink SQL 系列中的一篇，更多文章请关注<a href="/">Flink SQL 系列文档</a>。<br>内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。</p>
+<h1 id="背景"><a href="#背景" class="headerlink" title="背景"></a>背景</h1><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line"> channel,</span><br><span class="line"> <span class="built_in">COUNT</span>(<span class="keyword">DISTINCT</span> device_id) <span class="keyword">AS</span> uv</span><br><span class="line"><span class="keyword">FROM</span> source_table</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> channel</span><br></pre></td></tr></table></figure>
+<p>上面的SQL是为了统计一个应用各个频道的UV。</p>
+<p>有两个业务特点，频道值是可枚举的，事先可以确定的；不同频道的用户重合度很高。</p>
+<p>假设频道的枚举值有三个值：A，B，OTHER。这个原始的查询语句，设备的集合在状态中怎么存呢？</p>
+<table>
+<thead>
+<tr>
+<th>Group Key</th>
+<th>MapState: Key</th>
+<th>MapState: Value</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>A</td>
+<td>1</td>
+<td>1</td>
+</tr>
+<tr>
+<td>A</td>
+<td>2</td>
+<td>1</td>
+</tr>
+<tr>
+<td>B</td>
+<td>1</td>
+<td>1</td>
+</tr>
+<tr>
+<td>B</td>
+<td>3</td>
+<td>1</td>
+</tr>
+<tr>
+<td>OTHER</td>
+<td>3</td>
+<td>1</td>
+</tr>
+</tbody></table>
+<p>DISTINCT device_id 在状态中是个 MapState。MapState 的 Key 是 设备id；Value 是一个 Long 类型的值，一共64 bit，每个bit 表示这个频道下该设备是否出现了。在这个简单的场景下，Value 值就是 1。</p>
+<p> A 频道下有两个设备来访问，ID 分别为 1 和 2。ID 为1 的设备也访问了 B 频道。ID 为 2 的设备也访问了 OTHER 频道。</p>
+<p>我们很容易发现，每个频道有对应的Map，而且不同频道的 Map 的 Key 有大量的重合，怎么复用这些Key 呢？</p>
+<h2 id="原先的解决方案"><a href="#原先的解决方案" class="headerlink" title="原先的解决方案"></a>原先的解决方案</h2><p>可以用社区提供的方法手动改写 SQL，来复用 MapState 的 Key。</p>
+<p>首先是行转列操作，把频道拍到COUNT DISTINCT聚合函数的 filter 条件里，每列表示每个频道的UV 值。在输出之前用UDTF 做列转行。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="comment">-- 手动改写SQL 的方案 --</span></span><br><span class="line"><span class="keyword">SELECT</span> </span><br><span class="line">    TMP.channel, TMP.uv</span><br><span class="line"><span class="keyword">FROM</span> (</span><br><span class="line">    <span class="keyword">SELECT</span> </span><br><span class="line">        <span class="built_in">COUNT</span>(<span class="keyword">DISTINCT</span> device_id) <span class="keyword">FILTER</span> (<span class="keyword">WHERE</span> channel <span class="operator">=</span> <span class="string">&#x27;A&#x27;</span>) <span class="keyword">AS</span>   uv_1,    </span><br><span class="line">        <span class="built_in">COUNT</span>(<span class="keyword">DISTINCT</span> device_id) <span class="keyword">FILTER</span> (<span class="keyword">WHERE</span> channel <span class="operator">=</span> <span class="string">&#x27;B&#x27;</span>) <span class="keyword">AS</span> uv_2, </span><br><span class="line">        <span class="built_in">COUNT</span>(<span class="keyword">DISTINCT</span> device_id) <span class="keyword">FILTER</span> (<span class="keyword">WHERE</span> channel <span class="operator">=</span> <span class="string">&#x27;OTHER&#x27;</span>) <span class="keyword">AS</span> uv_3</span><br><span class="line">    <span class="keyword">FROM</span> source_table</span><br><span class="line">) T1, <span class="keyword">LATERAL</span> <span class="keyword">TABLE</span>(</span><br><span class="line">  toMultipleRow(uv_1, uv_2, uv_3)) <span class="keyword">AS</span> TMP (channel, uv)</span><br></pre></td></tr></table></figure>
+
+<p>改写后，设备集合在状态中是怎么存的呢？</p>
+<table>
+<thead>
+<tr>
+<th>Group Key</th>
+<th>MapState: Key</th>
+<th>MapState: Value</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>empty</td>
+<td>1</td>
+<td>110</td>
+</tr>
+<tr>
+<td>empty</td>
+<td>2</td>
+<td>010</td>
+</tr>
+<tr>
+<td>empty</td>
+<td>3</td>
+<td>011</td>
+</tr>
+</tbody></table>
+<p>MapState 的Value 依然是一个 Long 型的值，一共64 bit，每个bit 表示各个频道下这个设备是否出现了。</p>
+<p>比如 ID 为1的设备，Value 值是110，表示出现在了频道 A 和 B 中；ID 为3的设备，出现在了频道 B 和 OTHER 中。</p>
+<h2 id="收益"><a href="#收益" class="headerlink" title="收益"></a>收益</h2><p>可以复用 MapState 的Key，节省状态。</p>
+<h2 id="缺点"><a href="#缺点" class="headerlink" title="缺点"></a>缺点</h2><ol>
+<li>手动改写 SQL 比较复杂，尤其一个维度下有多个枚举值或者有多个可枚举的维度</li>
+<li>需要自己写 UDTF 做一行转多行的转换</li>
+</ol>
+<h1 id="新的解决方式"><a href="#新的解决方式" class="headerlink" title="新的解决方式"></a>新的解决方式</h1><p>为了提高用户的使用体验，可以在Flink 引擎层面针对这种场景自动做优化。</p>
+<p>SQL 语法上采用标准SQL：用户在 WHERE 条件里指定 GROUP KEY 的枚举值。</p>
+<p>引擎层面识别到这种 Pattern后，自动做节点改写。<br>新的方案和老的方案相比，优势是 SQL 写法简单。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">    channel,</span><br><span class="line">   <span class="built_in">COUNT</span>(<span class="keyword">DISTINCT</span> device_id) <span class="keyword">AS</span> uv</span><br><span class="line"><span class="keyword">FROM</span> source_table</span><br><span class="line"><span class="comment">-- WHERE 条件指定维度的枚举值 ---</span></span><br><span class="line"><span class="keyword">WHERE</span> channel <span class="keyword">IN</span> (<span class="string">&#x27;A&#x27;</span>,<span class="string">&#x27;B&#x27;</span>,<span class="string">&#x27;OTHER&#x27;</span>)</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> channel</span><br></pre></td></tr></table></figure>
+
+<h2 id="限制条件"><a href="#限制条件" class="headerlink" title="限制条件"></a>限制条件</h2><ol>
+<li>至少有一个可枚举维度且枚举值可以事先确定</li>
+<li>当用于窗口聚合时，窗口函数必须是行语义，即不适用于集合语义的窗口。<br>这个优化会调整聚合算子的 Group Key。调整完后，当前窗口收到的数据集合可能就变了，因此这个优化不适用于具有集合语义的窗口。<blockquote>
+<p>什么是行语义，什么是集合语义？<br>行语义：当前这条数据属于哪个窗口只取决于当前输入数据本身。比如 TUMBLE/HOP 窗口函数。<br>集合语义：当前这条数据属于哪个窗口不仅取决于当前输入数据，还取决于这个窗口收到过的历史数据集合。比如 SESSION 窗口函数。</p>
+</blockquote>
+</li>
+<li>另外各个维度值下的Distinct Key 得有重合，才可以节约状态。假设维度值是省份 id，计算各个省份下的UV，基本可以认为不同省份的 device_id 是不同的，这个时候复用 distinct key 是没有收益的。</li>
+</ol>
+<blockquote>
+<p>为什么语法上不采用 Calcite 的 PIVOT/UNPOVIT 显示地表达行转列和列转行。</p>
+<ol>
+<li>条件不具备，Calcite 中1.26版本才开始引入 PIVOT，1.27 版本才开始引入 UNPOVIT。<br>而 Flink 1.12 版本才开始依赖 Calcite 的1.26版本，至今依然是。</li>
+<li>用 PIVOT 和 UNPIVOT 语法来表达，SQL 会比现在的冗长很多。</li>
+</ol>
+</blockquote>
+<h2 id="适用场景"><a href="#适用场景" class="headerlink" title="适用场景"></a>适用场景</h2><ol>
+<li>适用于无限流聚合和窗口聚合</li>
+<li>适用于单个可枚举的维度和多个可枚举的维度</li>
+<li>适用于简单的分组聚合和多维聚合</li>
+</ol>
+<h2 id="SQL-表示"><a href="#SQL-表示" class="headerlink" title="SQL 表示"></a>SQL 表示</h2><p>用户在 WHERE 条件里指定 GROUP KEY 的枚举值，其他方式不变。</p>
+<h3 id="单个可枚举维度的-Case"><a href="#单个可枚举维度的-Case" class="headerlink" title="单个可枚举维度的 Case"></a>单个可枚举维度的 Case</h3><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line">    channel,</span><br><span class="line">   <span class="built_in">COUNT</span>(<span class="keyword">DISTINCT</span> device_id) <span class="keyword">AS</span> uv</span><br><span class="line"><span class="keyword">FROM</span> source_table</span><br><span class="line"><span class="comment">-- WHERE 条件指定维度的枚举值 ---</span></span><br><span class="line"><span class="keyword">WHERE</span> channel <span class="keyword">IN</span> (<span class="string">&#x27;A&#x27;</span>,<span class="string">&#x27;B&#x27;</span>,<span class="string">&#x27;OTHER&#x27;</span>)</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> channel</span><br></pre></td></tr></table></figure>
+
+<h3 id="多个可枚举维度的-Case"><a href="#多个可枚举维度的-Case" class="headerlink" title="多个可枚举维度的 Case"></a>多个可枚举维度的 Case</h3><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line"> channel, </span><br><span class="line"> platform, </span><br><span class="line"> entry_source,</span><br><span class="line"> <span class="built_in">COUNT</span>(<span class="keyword">DISTINCT</span> device_id) <span class="keyword">AS</span> uv</span><br><span class="line"><span class="keyword">FROM</span> source_table</span><br><span class="line"><span class="comment">-- WHERE 条件指定维度的枚举值 ---</span></span><br><span class="line"><span class="keyword">WHERE</span> channel <span class="keyword">IN</span> (<span class="string">&#x27;A&#x27;</span>,<span class="string">&#x27;B&#x27;</span>,<span class="string">&#x27;OTHER&#x27;</span>) <span class="keyword">AND</span> platform <span class="keyword">in</span> (<span class="string">&#x27;A&#x27;</span>, <span class="string">&#x27;B&#x27;</span>, <span class="string">&#x27;C&#x27;</span>)</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> channel, platform, entry_source</span><br></pre></td></tr></table></figure>
+
+<h3 id="Groupset-Cube-Rollup-下可枚举纬度的-Case"><a href="#Groupset-Cube-Rollup-下可枚举纬度的-Case" class="headerlink" title="Groupset/Cube/Rollup 下可枚举纬度的 Case"></a>Groupset/Cube/Rollup 下可枚举纬度的 Case</h3><p>Cube/Rollup/GroupSet 情况类似，这里只以 GroupSet 举例。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span></span><br><span class="line"> product,</span><br><span class="line"> entry_source,</span><br><span class="line"> <span class="built_in">COUNT</span>(<span class="keyword">DISTINCT</span> device_id) <span class="keyword">AS</span> uv,</span><br><span class="line"> GROUPING_ID(product, entry_source) <span class="keyword">AS</span> gid,</span><br><span class="line"><span class="keyword">FROM</span> source_table</span><br><span class="line"><span class="comment">-- WHERE 条件指定维度的枚举值 ---</span></span><br><span class="line"><span class="keyword">WHERE</span> product <span class="keyword">in</span> (<span class="string">&#x27;A&#x27;</span>,<span class="string">&#x27;B&#x27;</span>,<span class="string">&#x27;OTHER&#x27;</span>)</span><br><span class="line"><span class="keyword">GROUP</span> <span class="keyword">BY</span> <span class="keyword">GROUPING</span> SETS ((product, entry_source),())</span><br></pre></td></tr></table></figure>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/Flink/" rel="tag"># Flink</a>
+              <a href="/tags/Flink-SQL/" rel="tag"># Flink SQL</a>
+              <a href="/tags/%E7%8A%B6%E6%80%81%E5%A4%8D%E7%94%A8/" rel="tag"># 状态复用</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/window-agg-cube/" rel="prev" title="窗口聚合支持多维分析">
+      <i class="fa fa-chevron-left"></i> 窗口聚合支持多维分析
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/window-watermark-state/" rel="next" title="CUMULATE 窗口聚合计算 UV 时，曲线出现尖刺的问题跟进和解决">
+      CUMULATE 窗口聚合计算 UV 时，曲线出现尖刺的问题跟进和解决 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let { activeClass } = CONFIG.comments;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          Table of Contents
+        </li>
+        <li class="sidebar-nav-overview">
+          Overview
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#%E5%89%8D%E8%A8%80"><span class="nav-number">1.</span> <span class="nav-text">前言</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#%E8%83%8C%E6%99%AF"><span class="nav-number">2.</span> <span class="nav-text">背景</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#%E5%8E%9F%E5%85%88%E7%9A%84%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88"><span class="nav-number">2.1.</span> <span class="nav-text">原先的解决方案</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E6%94%B6%E7%9B%8A"><span class="nav-number">2.2.</span> <span class="nav-text">收益</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E7%BC%BA%E7%82%B9"><span class="nav-number">2.3.</span> <span class="nav-text">缺点</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#%E6%96%B0%E7%9A%84%E8%A7%A3%E5%86%B3%E6%96%B9%E5%BC%8F"><span class="nav-number">3.</span> <span class="nav-text">新的解决方式</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#%E9%99%90%E5%88%B6%E6%9D%A1%E4%BB%B6"><span class="nav-number">3.1.</span> <span class="nav-text">限制条件</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E9%80%82%E7%94%A8%E5%9C%BA%E6%99%AF"><span class="nav-number">3.2.</span> <span class="nav-text">适用场景</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#SQL-%E8%A1%A8%E7%A4%BA"><span class="nav-number">3.3.</span> <span class="nav-text">SQL 表示</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%8D%95%E4%B8%AA%E5%8F%AF%E6%9E%9A%E4%B8%BE%E7%BB%B4%E5%BA%A6%E7%9A%84-Case"><span class="nav-number">3.3.1.</span> <span class="nav-text">单个可枚举维度的 Case</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%A4%9A%E4%B8%AA%E5%8F%AF%E6%9E%9A%E4%B8%BE%E7%BB%B4%E5%BA%A6%E7%9A%84-Case"><span class="nav-number">3.3.2.</span> <span class="nav-text">多个可枚举维度的 Case</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#Groupset-Cube-Rollup-%E4%B8%8B%E5%8F%AF%E6%9E%9A%E4%B8%BE%E7%BA%AC%E5%BA%A6%E7%9A%84-Case"><span class="nav-number">3.3.3.</span> <span class="nav-text">Groupset&#x2F;Cube&#x2F;Rollup 下可枚举纬度的 Case</span></a></li></ol></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">张静</p>
+  <div class="site-description" itemprop="description"></div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">7</span>
+          <span class="site-state-item-name">posts</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-tags">
+        <span class="site-state-item-count">6</span>
+        <span class="site-state-item-name">tags</span>
+      </div>
+  </nav>
+</div>
+  <div class="links-of-author motion-element">
+      <span class="links-of-author-item">
+        <a href="https://github.com/beyond1920" title="GitHub → https:&#x2F;&#x2F;github.com&#x2F;beyond1920" rel="noopener" target="_blank"><i class="fab fa-github fa-fw"></i>GitHub</a>
+      </span>
+      <span class="links-of-author-item">
+        <a href="mailto:beyond1920@gmail.com" title="E-Mail → mailto:beyond1920@gmail.com" rel="noopener" target="_blank"><i class="fa fa-envelope fa-fw"></i>E-Mail</a>
+      </span>
+  </div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2021</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">张静</span>
+</div>
+  <div class="powered-by">Powered by <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> & <a href="https://muse.theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Muse</a>
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+
+<script src="/js/utils.js"></script>
+
+<script src="/js/motion.js"></script>
+
+
+<script src="/js/schemes/muse.js"></script>
+
+
+<script src="/js/next-boot.js"></script>
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+  <script src="//cdn.jsdelivr.net/npm/quicklink@1/dist/quicklink.umd.js"></script>
+  <script>
+      window.addEventListener('load', () => {
+      quicklink({
+        timeout : 3000,
+        priority: true,
+        ignores : [uri => uri.includes('#'),uri => uri === 'https://flink.wjh.me/mapstate-reuse/',]
+      });
+      });
+  </script>
+
+</body>
+</html>

@@ -20,25 +20,24 @@
     var CONFIG = {"hostname":"flink.wjh.me","root":"/","scheme":"Muse","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":false,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}};
   </script>
 
-  <meta name="description" content="前言本文是 Flink SQL 系列中的一篇，更多文章请关注Flink SQL 系列文档。内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。 原理梳理LookupJoin 根据获取维表数据的方式是同步获取还是异步获取分为两种实现。同步的实现基于 ProcessOperator，异步的实现基于 AsyncWaitOperator。 Sync LookupJoin对于同步的 Look">
+  <meta name="description" content="前言本文是 Flink SQL 系列中的一篇，更多文章请关注Flink SQL 系列文档。内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。 背景业务同学反馈使用 CUMULATE 窗口聚合计算 UV，从 savepoint 恢复后数据曲线偶尔会出现数据尖刺。  问题已经修复到 Flink 1.15 版本。这篇文章主要分析这个问题是怎么产生的以及解决方案。 复现问题的条件数据源乱">
 <meta property="og:type" content="article">
-<meta property="og:title" content="维表 JOIN 的原理介绍及源码剖析">
-<meta property="og:url" content="https://flink.wjh.me/lookup-join-code-reader/index.html">
+<meta property="og:title" content="CUMULATE 窗口聚合计算 UV 时，曲线出现尖刺的问题跟进和解决">
+<meta property="og:url" content="https://flink.wjh.me/window-watermark-state/index.html">
 <meta property="og:site_name" content="张静">
-<meta property="og:description" content="前言本文是 Flink SQL 系列中的一篇，更多文章请关注Flink SQL 系列文档。内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。 原理梳理LookupJoin 根据获取维表数据的方式是同步获取还是异步获取分为两种实现。同步的实现基于 ProcessOperator，异步的实现基于 AsyncWaitOperator。 Sync LookupJoin对于同步的 Look">
+<meta property="og:description" content="前言本文是 Flink SQL 系列中的一篇，更多文章请关注Flink SQL 系列文档。内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。 背景业务同学反馈使用 CUMULATE 窗口聚合计算 UV，从 savepoint 恢复后数据曲线偶尔会出现数据尖刺。  问题已经修复到 Flink 1.15 版本。这篇文章主要分析这个问题是怎么产生的以及解决方案。 复现问题的条件数据源乱">
 <meta property="og:locale" content="en_US">
-<meta property="og:image" content="https://flink.wjh.me/lookup-join-code-reader/144d183cefd8bb5a60b9f36820bcb31a.png">
-<meta property="og:image" content="https://flink.wjh.me/lookup-join-code-reader/8f56c8da7237f5c6f561d38a96bf67f1.png">
-<meta property="article:published_time" content="2021-09-11T10:43:34.000Z">
-<meta property="article:modified_time" content="2021-09-11T14:28:40.480Z">
+<meta property="og:image" content="https://flink.wjh.me/window-watermark-state/window-watermark-state.assets/image-20211214184246043.png">
+<meta property="article:published_time" content="2021-12-14T13:43:06.000Z">
+<meta property="article:modified_time" content="2021-12-14T11:07:08.073Z">
 <meta property="article:author" content="张静">
-<meta property="article:tag" content="Join">
+<meta property="article:tag" content="Window Aggregate">
 <meta property="article:tag" content="Flink">
 <meta property="article:tag" content="Flink SQL">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:image" content="https://flink.wjh.me/lookup-join-code-reader/144d183cefd8bb5a60b9f36820bcb31a.png">
+<meta name="twitter:image" content="https://flink.wjh.me/window-watermark-state/window-watermark-state.assets/image-20211214184246043.png">
 
-<link rel="canonical" href="https://flink.wjh.me/lookup-join-code-reader/">
+<link rel="canonical" href="https://flink.wjh.me/window-watermark-state/">
 
 
 <script id="page-configurations">
@@ -51,7 +50,7 @@
   };
 </script>
 
-  <title>维表 JOIN 的原理介绍及源码剖析 | 张静</title>
+  <title>CUMULATE 窗口聚合计算 UV 时，曲线出现尖刺的问题跟进和解决 | 张静</title>
   
 
 
@@ -166,7 +165,7 @@
   
   
   <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="en">
-    <link itemprop="mainEntityOfPage" href="https://flink.wjh.me/lookup-join-code-reader/">
+    <link itemprop="mainEntityOfPage" href="https://flink.wjh.me/window-watermark-state/">
 
     <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
       <meta itemprop="image" content="/images/avatar.gif">
@@ -179,7 +178,7 @@
     </span>
       <header class="post-header">
         <h1 class="post-title" itemprop="name headline">
-          维表 JOIN 的原理介绍及源码剖析
+          CUMULATE 窗口聚合计算 UV 时，曲线出现尖刺的问题跟进和解决
         </h1>
 
         <div class="post-meta">
@@ -190,7 +189,7 @@
               <span class="post-meta-item-text">Posted on</span>
               
 
-              <time title="Created: 2021-09-11 18:43:34 / Modified: 22:28:40" itemprop="dateCreated datePublished" datetime="2021-09-11T18:43:34+08:00">2021-09-11</time>
+              <time title="Created: 2021-12-14 21:43:06 / Modified: 19:07:08" itemprop="dateCreated datePublished" datetime="2021-12-14T21:43:06+08:00">2021-12-14</time>
             </span>
 
           
@@ -205,21 +204,32 @@
 
       
         <h1 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h1><p>本文是 Flink SQL 系列中的一篇，更多文章请关注<a href="/">Flink SQL 系列文档</a>。<br>内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。</p>
-<h1 id="原理梳理"><a href="#原理梳理" class="headerlink" title="原理梳理"></a>原理梳理</h1><p>LookupJoin 根据获取维表数据的方式是同步获取还是异步获取分为两种实现。同步的实现基于 ProcessOperator，异步的实现基于 AsyncWaitOperator。</p>
-<h2 id="Sync-LookupJoin"><a href="#Sync-LookupJoin" class="headerlink" title="Sync LookupJoin"></a>Sync LookupJoin</h2><p><img src="144d183cefd8bb5a60b9f36820bcb31a.png" alt="1"><br>对于同步的 LookupJoin 来说，主表一条数据 Record 来了以后，会经过以下几个步骤：</p>
+<h1 id="背景"><a href="#背景" class="headerlink" title="背景"></a>背景</h1><p>业务同学反馈使用 CUMULATE 窗口聚合计算 UV，从 savepoint 恢复后数据曲线偶尔会出现数据尖刺。</p>
+<p><img src="window-watermark-state.assets/image-20211214184246043.png" alt="image-20211214184246043"></p>
+<p>问题已经修复到 Flink 1.15 版本。这篇文章主要分析这个问题是怎么产生的以及解决方案。</p>
+<h1 id="复现问题的条件"><a href="#复现问题的条件" class="headerlink" title="复现问题的条件"></a>复现问题的条件</h1><p>数据源乱序比较严重，导致从 savepoint 恢复作业后，watermark 重建出的新 watermark 回退了。</p>
+<h1 id="问题分析"><a href="#问题分析" class="headerlink" title="问题分析"></a>问题分析</h1><p>该问题的根本原因是受两点原因综合影响：</p>
 <ol>
-<li>分析 Record 的 Key，基于 Key 去维表侧获取数据</li>
-<li>如果维表上有 Calc，维表返回的数据需要经过 CalcCollector，做过滤或者列裁剪后才会返回</li>
-<li>如果 JOIN 条件里除了维表上的 LookupKey 还有剩余的关联条件，经过 CodeGen TableFunctionCollector，过滤出满足 Remaing Condition 的数据</li>
-<li>TableFunctionCollector 里关联主表的 Record 和第3步返回的一条或多条维表记录</li>
+<li>CUMULATE WINDOW 聚合算子对迟到数据的处理方式</li>
+<li>watermark 不记录到状态里，从savepoint/checkpoint 恢复后 watermark 会重建</li>
 </ol>
-<h2 id="Async-LookupJoin"><a href="#Async-LookupJoin" class="headerlink" title="Async LookupJoin"></a>Async LookupJoin</h2><p><img src="8f56c8da7237f5c6f561d38a96bf67f1.png" alt="2"><br>异步的 LookupJoin 和同步的 LookupJoin 最大的区别就是当前主表的数据来了以后，发出异步关联请求后，不需要等请求返回，就可以处理下一条主表的输入数据了。对于异步的 LookupJoin 来说，主表一条数据 Record 来了以后，经过的流程：</p>
+<p>下面分别说明这两个原因。</p>
+<h2 id="CUMULATE-WINDOW-聚合算子对迟到数据的处理方式"><a href="#CUMULATE-WINDOW-聚合算子对迟到数据的处理方式" class="headerlink" title="CUMULATE WINDOW 聚合算子对迟到数据的处理方式"></a>CUMULATE WINDOW 聚合算子对迟到数据的处理方式</h2><p>目前 Cumulate Window Aggregate 对迟到数据的处理方式是判断该数据所属的大窗口是否已经迟到，如果大窗口迟到了，直接丢弃；如果大窗口还没有迟到，把该条数据记录到 merged state 里，不会修正已经发出的窗口数据，但是后续的同属于一个大窗口的结果数据会算上这条记录。</p>
+<p>SELECT window_start, window_end, COUNT(USER_ID)<br>  FROM TABLE(<br>    CUMULATE(TABLE Bid, DESCRIPTOR(bidtime), INTERVAL ‘1’ MINUTES, INTERVAL ‘1’ DAY))<br>  GROUP BY window_start, window_end;</p>
+<p>以上面的例子为例，当 watermark 到了 2021-10-11 11:01，往下游发送 [00:00, 11:01) 窗口的结果，比如是 INSERT (00:00, 11:01, 4)。<br>这个时候来了一个迟到数据，event time 是 2021-10-11 11:00，这条数据所属的大窗口还没有迟到，因此直接把该条记录记录到 merged state 里，后续窗口的结果（比如 [00:00, 11:02),[00:00, 11:03)…  ）会算上该条迟到数据，但是不会修正已经发送出去的窗口数据。</p>
+<h2 id="从savepoint-checkpoint-恢复后-Watermark-重建"><a href="#从savepoint-checkpoint-恢复后-Watermark-重建" class="headerlink" title="从savepoint/checkpoint 恢复后 Watermark 重建"></a>从savepoint/checkpoint 恢复后 Watermark 重建</h2><p>目前 FLINK 里，watermark 不会记录到 state 里，从savepoint 和 checkpoint 恢复后，watermark 会发生重建，这会带来一些非预期的行为，比如原本的迟到数据再重启后被当成了非迟到数据。<br>还以上面的例子来说，当 watermark 到了 2021-10-11 11:01，往下游发送 [00:00, 11:01) 窗口的结果，比如是 INSERT (00:00, 11:01, 4)。<br>这个时候做 savepoint，并让作业从 savepoint 重启，由于 watermark 会重建，重建后的 watermark 可能会比重启前的小，尤其是遇到乱序数据时，比如 watermark 可能回退到了11:00，<br>这个时候来了一条数据，event time 是 2021-10-11 11:00。这个数据在重启前会被认为是迟到数据，但是重启后，由于发生了 watermark 重建，该条数据不会被认为是迟到数据，当 watermark 再次到达 11:01 时，会往下游再次发送一条窗口是 [00:00, 11:01] 的结果。<br>因此下游会收到两次 [00:00, 11:01] 窗口的 INSERT 结果。可能会引发数据质量问题，比如外层进行合桶聚合时。</p>
+<h1 id="解决方案"><a href="#解决方案" class="headerlink" title="解决方案"></a>解决方案</h1><p>上面介绍了，该问题的根本原因是受两点原因综合影响：</p>
 <ol>
-<li>分析 Record 的 Key，向维表发出异步的数据请求后，就可以处理下一条输入数据了</li>
-<li>如果维表上有 Calc，维表返回的数据需要经过 TemporalTableCalcResultFuture，做过滤或者列裁剪后才会返回</li>
-<li>如果 JOIN 条件里除了维表上的 LookupKey 还有剩余的关联条件，经过 CodeGen TableFunctionResultFuture，过滤出满足 Remaing Condition 的数据</li>
-<li>JoinedRowResultFuture 关联主表的 Record 和第3步返回的一条或多条维表记录</li>
+<li>CUMULATE WINDOW 聚合算子对迟到数据的处理方式</li>
+<li>Watermark 不记录到状态里，从savepoint/checkpoint 恢复后 watermark 会重建</li>
 </ol>
+<p>相应的，解决方案也有两种，只需要破坏上面的两点原因中的任何一点即可。</p>
+<ol>
+<li>把 Watermark 记录到 Cumulate Window 聚合算子 的 state 里。</li>
+<li>修改 CUMULATE WINDOW 聚合算子对迟到的数据方式，对已经发送的窗口数据，以 retract 流的方式进行更新。但是不推荐这种方案，因为<br> a. 实现上需要对  CUMULATE WINDOW 聚合算子进行较大的修改，调整状态保留机制和对迟到数据的处理方式<br> b. 我们不希望 CUMULATE WINDOW 算子发送 retract 流，否则又可能会出现两级聚合后带来的数据曲线问题，见文章 <a href="/day-acc-solution">Flink SQL 系列文章: 针对天级别聚合且按分钟打点的需求，方案演进之路</a></li>
+</ol>
+<p>因此，我们选择方案1的方式来修复。把 Watermark 记录到 Window 算子的 Operator State 里。感兴趣的同学可以参考 <a target="_blank" rel="noopener" href="https://issues.apache.org/jira/browse/FLINK-24501">FLINK-24501</a> 了解细节。</p>
+<p>另外，不光 Window Operator 存在这个问题，IntervalJoin 等依赖 rowtime 的算子都存在这个问题，根本的解决方案是考虑一个通用的方案，当作业依赖 watermark 时，把 watermark 记录到 State 里。</p>
 
     </div>
 
@@ -229,7 +239,7 @@
 
       <footer class="post-footer">
           <div class="post-tags">
-              <a href="/tags/Join/" rel="tag"># Join</a>
+              <a href="/tags/Window-Aggregate/" rel="tag"># Window Aggregate</a>
               <a href="/tags/Flink/" rel="tag"># Flink</a>
               <a href="/tags/Flink-SQL/" rel="tag"># Flink SQL</a>
           </div>
@@ -240,12 +250,12 @@
         
     <div class="post-nav">
       <div class="post-nav-item">
-    <a href="/day-acc-solution/" rel="prev" title="针对天级别聚合且按分钟打点的需求，方案演进之路">
-      <i class="fa fa-chevron-left"></i> 针对天级别聚合且按分钟打点的需求，方案演进之路
+    <a href="/mapstate-reuse/" rel="prev" title="Distinct MapState 状态复用优化">
+      <i class="fa fa-chevron-left"></i> Distinct MapState 状态复用优化
     </a></div>
       <div class="post-nav-item">
-    <a href="/window-agg-cube/" rel="next" title="窗口聚合支持多维分析">
-      窗口聚合支持多维分析 <i class="fa fa-chevron-right"></i>
+    <a href="/read-user-conf/" rel="next" title="如何在 UDF 里读取自定义的参数值">
+      如何在 UDF 里读取自定义的参数值 <i class="fa fa-chevron-right"></i>
     </a></div>
     </div>
       </footer>
@@ -305,7 +315,7 @@
 
       <!--noindex-->
       <div class="post-toc-wrap sidebar-panel">
-          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#%E5%89%8D%E8%A8%80"><span class="nav-number">1.</span> <span class="nav-text">前言</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#%E5%8E%9F%E7%90%86%E6%A2%B3%E7%90%86"><span class="nav-number">2.</span> <span class="nav-text">原理梳理</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#Sync-LookupJoin"><span class="nav-number">2.1.</span> <span class="nav-text">Sync LookupJoin</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Async-LookupJoin"><span class="nav-number">2.2.</span> <span class="nav-text">Async LookupJoin</span></a></li></ol></li></ol></div>
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#%E5%89%8D%E8%A8%80"><span class="nav-number">1.</span> <span class="nav-text">前言</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#%E8%83%8C%E6%99%AF"><span class="nav-number">2.</span> <span class="nav-text">背景</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#%E5%A4%8D%E7%8E%B0%E9%97%AE%E9%A2%98%E7%9A%84%E6%9D%A1%E4%BB%B6"><span class="nav-number">3.</span> <span class="nav-text">复现问题的条件</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#%E9%97%AE%E9%A2%98%E5%88%86%E6%9E%90"><span class="nav-number">4.</span> <span class="nav-text">问题分析</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#CUMULATE-WINDOW-%E8%81%9A%E5%90%88%E7%AE%97%E5%AD%90%E5%AF%B9%E8%BF%9F%E5%88%B0%E6%95%B0%E6%8D%AE%E7%9A%84%E5%A4%84%E7%90%86%E6%96%B9%E5%BC%8F"><span class="nav-number">4.1.</span> <span class="nav-text">CUMULATE WINDOW 聚合算子对迟到数据的处理方式</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E4%BB%8Esavepoint-checkpoint-%E6%81%A2%E5%A4%8D%E5%90%8E-Watermark-%E9%87%8D%E5%BB%BA"><span class="nav-number">4.2.</span> <span class="nav-text">从savepoint&#x2F;checkpoint 恢复后 Watermark 重建</span></a></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88"><span class="nav-number">5.</span> <span class="nav-text">解决方案</span></a></li></ol></div>
       </div>
       <!--/noindex-->
 
@@ -424,7 +434,7 @@
       quicklink({
         timeout : 3000,
         priority: true,
-        ignores : [uri => uri.includes('#'),uri => uri === 'https://flink.wjh.me/lookup-join-code-reader/',]
+        ignores : [uri => uri.includes('#'),uri => uri === 'https://flink.wjh.me/window-watermark-state/',]
       });
       });
   </script>

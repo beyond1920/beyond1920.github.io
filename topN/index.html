@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 5.4.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/all.min.css">
+
+<script id="hexo-configurations">
+    var NexT = window.NexT || {};
+    var CONFIG = {"hostname":"flink.wjh.me","root":"/","scheme":"Muse","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":false,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}};
+  </script>
+
+  <meta name="description" content="前言本文是 Flink SQL 系列中的一篇，更多文章请关注Flink SQL 系列文档。内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。 Plan 重写全局 TopN全局 TopN 有两种写法，比如：对全网商家按销售额排序，计算出销售额排名前十的商家。有如下两种写法： 写法11SELECT shop_id, shop_name FROM shop_sales ORDER BY">
+<meta property="og:type" content="article">
+<meta property="og:title" content="流式 TopN 原理介绍">
+<meta property="og:url" content="https://flink.wjh.me/topN/index.html">
+<meta property="og:site_name" content="张静">
+<meta property="og:description" content="前言本文是 Flink SQL 系列中的一篇，更多文章请关注Flink SQL 系列文档。内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。 Plan 重写全局 TopN全局 TopN 有两种写法，比如：对全网商家按销售额排序，计算出销售额排名前十的商家。有如下两种写法： 写法11SELECT shop_id, shop_name FROM shop_sales ORDER BY">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="https://static.yximgs.com/udata/pkg/EE-KSTACK/d261b4ba80f2fccd1e771dce412f056d.png">
+<meta property="og:image" content="https://static.yximgs.com/udata/pkg/EE-KSTACK/27cc06ae20a1299b247dcb5c63d8bb4c.png">
+<meta property="og:image" content="https://static.yximgs.com/udata/pkg/EE-KSTACK/5ef7b1d085b8d446f99db6c2b0a5a5cf.png">
+<meta property="og:image" content="https://static.yximgs.com/udata/pkg/EE-KSTACK/8eda9b04aefbb4859dc0482e1cdee0d4.png">
+<meta property="og:image" content="https://static.yximgs.com/udata/pkg/EE-KSTACK/08516102222742e4ad84e520ea21bb74.png">
+<meta property="article:published_time" content="2021-12-14T14:30:00.000Z">
+<meta property="article:modified_time" content="2021-12-14T11:45:17.625Z">
+<meta property="article:author" content="张静">
+<meta property="article:tag" content="Flink">
+<meta property="article:tag" content="Flink SQL">
+<meta property="article:tag" content="TopN">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://static.yximgs.com/udata/pkg/EE-KSTACK/d261b4ba80f2fccd1e771dce412f056d.png">
+
+<link rel="canonical" href="https://flink.wjh.me/topN/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome : false,
+    isPost : true,
+    lang   : 'en'
+  };
+</script>
+
+  <title>流式 TopN 原理介绍 | 张静</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="Toggle navigation bar">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+
+  <div class="site-meta">
+
+    <a href="/" class="brand" rel="start">
+      <span class="logo-line-before"><i></i></span>
+      <h1 class="site-title">张静</h1>
+      <span class="logo-line-after"><i></i></span>
+    </a>
+  </div>
+
+  <div class="site-nav-right">
+    <div class="toggle popup-trigger">
+    </div>
+  </div>
+</div>
+
+
+
+
+<nav class="site-nav">
+  <ul id="menu" class="main-menu menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="home fa-fw"></i>Home</a>
+
+  </li>
+        <li class="menu-item menu-item-about">
+
+    <a href="/about/" rel="section"><i class="fa fa-user fa-fw"></i>About</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="tags fa-fw"></i>Tags</a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-archive fa-fw"></i>Archives</a>
+
+  </li>
+  </ul>
+</nav>
+
+
+
+
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content post posts-expand">
+            
+
+    
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="en">
+    <link itemprop="mainEntityOfPage" href="https://flink.wjh.me/topN/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="张静">
+      <meta itemprop="description" content="">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="张静">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          流式 TopN 原理介绍
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-calendar"></i>
+              </span>
+              <span class="post-meta-item-text">Posted on</span>
+              
+
+              <time title="Created: 2021-12-14 22:30:00 / Modified: 19:45:17" itemprop="dateCreated datePublished" datetime="2021-12-14T22:30:00+08:00">2021-12-14</time>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h1><p>本文是 Flink SQL 系列中的一篇，更多文章请关注<a href="/">Flink SQL 系列文档</a>。<br>内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。</p>
+<h1 id="Plan-重写"><a href="#Plan-重写" class="headerlink" title="Plan 重写"></a>Plan 重写</h1><h2 id="全局-TopN"><a href="#全局-TopN" class="headerlink" title="全局 TopN"></a>全局 TopN</h2><p>全局 TopN 有两种写法，比如：对全网商家按销售额排序，计算出销售额排名前十的商家。有如下两种写法：</p>
+<h3 id="写法1"><a href="#写法1" class="headerlink" title="写法1"></a>写法1</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">SELECT shop_id, shop_name FROM shop_sales ORDER BY sales DESC LIMIT 10</span><br></pre></td></tr></table></figure>
+<h3 id="写法2"><a href="#写法2" class="headerlink" title="写法2"></a>写法2</h3><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">SELECT shop_id, shop_name, rownum</span><br><span class="line">FROM (</span><br><span class="line">  SELECT shop_id, shop_name,</span><br><span class="line">    ROW_NUMBER() OVER (ORDER BY sales DESC) AS rownum</span><br><span class="line">  FROM shop_sales)</span><br><span class="line">WHERE rownum &lt;= 10</span><br></pre></td></tr></table></figure>
+
+<h2 id="分组-TopN"><a href="#分组-TopN" class="headerlink" title="分组 TopN"></a>分组 TopN</h2><p>对全网商家根据行业按销售额排序，计算出每个行业销售额前十名的商家。分组 TopN 只有 ROW_NUMBER 一种写法。写法如下：</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">SELECT shop_id, shop_name, rownum</span><br><span class="line">FROM (</span><br><span class="line">  SELECT shop_id, shop_name,</span><br><span class="line">    ROW_NUMBER() OVER (PARTITION BY category ORDER BY sales DESC) AS rownum</span><br><span class="line">  FROM shop_sales)</span><br><span class="line">WHERE rownum &lt;= 10</span><br></pre></td></tr></table></figure>
+
+<h3 id="ROW-NUMBER-写法，优化器的改写规则"><a href="#ROW-NUMBER-写法，优化器的改写规则" class="headerlink" title="ROW_NUMBER 写法，优化器的改写规则"></a>ROW_NUMBER 写法，优化器的改写规则</h3><p>分组 TopN 只有一种开窗函数的写法，全局 TopN 有两种写法：一种是 ORDER BY + LIMIT 的写法，另一种是 ROW_NUMBER 的写法。<br>对于用开窗函数的 TopN 写法，无论是全局 TopN 还是分组 TopN，优化器会做改写，把 OverAggregate 和 Calc 合并后改写成 TopN 算子。<br>ROW_NUMBER 写法上对应 OverAggregate 节点 和 Calc 节点 （过滤行数），优化器会进行重写，把这两个节点合并，转为 Rank 节点。<br>对于上面的示例（每个行业销售额前十名的商家），优化器重写流程如下：<br><img src="https://static.yximgs.com/udata/pkg/EE-KSTACK/d261b4ba80f2fccd1e771dce412f056d.png" alt="1"></p>
+<h3 id="ORDER-BY-LIMIT-写法，优化器的改写规则"><a href="#ORDER-BY-LIMIT-写法，优化器的改写规则" class="headerlink" title="ORDER BY + LIMIT 写法，优化器的改写规则"></a>ORDER BY + LIMIT 写法，优化器的改写规则</h3><p> <img src="https://static.yximgs.com/udata/pkg/EE-KSTACK/27cc06ae20a1299b247dcb5c63d8bb4c.png" alt="2"><br>SortLimit 和 Rank 两种节点虽然在 ExecNode 层面是两个不同类型的 Node，但是把 ExecNode转为 Transformation 后，底层的 Operator 是一样的，都会转为三种 TopNFunction 的其中一个。 </p>
+<h1 id="TopN-Function-梳理"><a href="#TopN-Function-梳理" class="headerlink" title="TopN Function 梳理"></a>TopN Function 梳理</h1><p>Flink 用 ROW_NUMBER 开窗函数用法来表达 TopN，优化器层面会把 OverAggregate 和 Calc 节点转为 Rank 节点。Rank 节点支持5种 AbstractTopNFunction 实现，本文将会深入分析其中三种实现的应用场景和具体实现。<br>TopNFunction 有五种实现：</p>
+<ul>
+<li>RetractableTopNFunction<br>输入流是 Upsert 流 或者 Retract 流。是保底算法，性能最差，因为需要在 State 里维护所有的历史数据。</li>
+<li>UpdatableTopNFunction<br>当输入流满足下面3点要求，可以使用 UpdatableTopNFunction， UpdatableTopNFunction 是对 RetractableTopNFunction 的优化。<br>a. 输入流是 Upsert 流，不能是 Retract 流。即只能有 Insert 消息和 Update After 消息，不能有Update Before （Retract） 和 Delete 消息<br>b.  输入流必须要有 Primary Key，且相同 Primary Key 的数据一定分发到相同的并发上 ，即输入流的 Primary Key 包含 Partition Key<br>c. 输入数据在排序字段具有单调属性，且单调属性与排序方向相反，如 Order by count/count_distinct/sum(非负数) desc。这确保一条记录一旦进入 TopN，后续在这条记录上的更新只会让这条记录的排名靠前，而不会滑落出 TopN 排行榜（因为一旦当前 更新消息导致这条记录滑落出 TopN 排行榜，就需要从历史数据里捞出一条记录补齐 TopN，这样 State 里就不能只存 TopN 数据）。</li>
+<li>AppendOnlyTopNFunction<br>当输入流中只有 Insert 消息，即是 Append 流，可以使用 AppendOnlyTopNFunction。</li>
+<li>AppendOnlyFirstNFunction<br>AppendOnlyFirstNFunction 是一种特殊的 AppendOnlyTopNFunction 。为了提高性能，把在时间属性上进行排序的 TopN 转为 AppendOnlyFirstNFunction。</li>
+<li>FastTop1Function<br>FastTop1Function 也是一种特殊的 AppendOnlyTopNFunction ，当只需要 Top1 时，且不满足转为 <a target="_blank" rel="noopener" href="https://nightlies.apache.org/flink/flink-docs-master/docs/dev/table/sql/queries/deduplication/">Deduplicate</a> 的条件，可以转为 FastTop1Function。</li>
+</ul>
+<h2 id="通用的数据结构"><a href="#通用的数据结构" class="headerlink" title="通用的数据结构"></a>通用的数据结构</h2><h3 id="TopNBuffer"><a href="#TopNBuffer" class="headerlink" title="TopNBuffer"></a>TopNBuffer</h3><p>用来存储一个 Partition Key 下，基于 SortKey 排序后的 TopN 数据。实现基于 TreeMap。</p>
+<h3 id="LRUMap"><a href="#LRUMap" class="headerlink" title="LRUMap"></a>LRUMap</h3><p>为了减少和 State 交互，LRUMap 缓存 Partition Key 和它对应的 TopN 数据的映射关系。实现基于 LinkedHashMap。</p>
+<h2 id="AppendOnlyTopNFunction"><a href="#AppendOnlyTopNFunction" class="headerlink" title="AppendOnlyTopNFunction"></a>AppendOnlyTopNFunction</h2><h3 id="内存-Cache-的设计"><a href="#内存-Cache-的设计" class="headerlink" title="内存 Cache 的设计"></a>内存 Cache 的设计</h3><p>内存 Cache 里缓存了 PartitionKey 到该 PartitionKey 对应的 TopN 数据。<br>数据结构是 LRUMap。其中，Key 是 PartitionKey，Value 是 TopNBuffer (PartitionKey 下对应的 TopN 数据），是 State 的数据在内存中的缓存。</p>
+<h3 id="State-设计"><a href="#State-设计" class="headerlink" title="State 设计"></a>State 设计</h3><h4 id="存储的内容"><a href="#存储的内容" class="headerlink" title="存储的内容"></a>存储的内容</h4><p>存储 TopN 记录即可，不需要存储所有的数据</p>
+<h4 id="存储格式"><a href="#存储格式" class="headerlink" title="存储格式"></a>存储格式</h4><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">MapState&lt;RowData, List&lt;RowData&gt;&gt;（Key 是 SortKey，Value 是 Records 列表）。</span><br></pre></td></tr></table></figure>
+
+<h4 id="State-读写时机"><a href="#State-读写时机" class="headerlink" title="State 读写时机"></a>State 读写时机</h4><p>Per Record 和 State 交互，虽然 LRUCache 可以抵消一部分 State get 操作，但是对于引起 TopN 数据发生变化的输入数据，仍然有 Per Record 级别的 State Update 操作，比如在 State 里保存新晋的记录以及删除淘汰的记录。</p>
+<h3 id="处理流程"><a href="#处理流程" class="headerlink" title="处理流程"></a>处理流程</h3><p> <img src="https://static.yximgs.com/udata/pkg/EE-KSTACK/5ef7b1d085b8d446f99db6c2b0a5a5cf.png" alt="3"></p>
+<h2 id="UpdateFastRankFunction"><a href="#UpdateFastRankFunction" class="headerlink" title="UpdateFastRankFunction"></a>UpdateFastRankFunction</h2><h3 id="内存-Cache-的设计-1"><a href="#内存-Cache-的设计-1" class="headerlink" title="内存 Cache 的设计"></a>内存 Cache 的设计</h3><p>内存 Cache 里缓存了各个 Partition Key 下 TopN 数据。<br>数据结构是一个 LRUMap，Key 是 Partition Key，Value 是该 Partition Key 下 TopN 的数据（是个 Map，Key 是 Primary Key， Value 是 Record），对应到 State的数据在内存里的缓存。</p>
+<p>另外，为了提高读写效率，内存里还维护了相同数据的另外一份表现形式，Key 是 PartitionKey，Value 是 TopNBuffer（Key 是 SortKey，Value 是 Records的 Primary Key 列表）。</p>
+<h3 id="State-设计-1"><a href="#State-设计-1" class="headerlink" title="State 设计"></a>State 设计</h3><h4 id="存储的内容-1"><a href="#存储的内容-1" class="headerlink" title="存储的内容"></a>存储的内容</h4><p>存储 TopN 记录即可，不需要存储所有的数据</p>
+<h4 id="存储格式-1"><a href="#存储格式-1" class="headerlink" title="存储格式"></a>存储格式</h4><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">MapState&lt;RowData, Tuple2&lt;RowData, Integer&gt;&gt;  (Key是 rowkey， Value 是Tuple2.of(record, index in the list of same sort key)。</span><br></pre></td></tr></table></figure>
+
+<h4 id="State-读写时机-1"><a href="#State-读写时机-1" class="headerlink" title="State 读写时机"></a>State 读写时机</h4><p> 平时和Cache 交互，只在下面三种情况才和 State 交互</p>
+<ol>
+<li>没有命中 Cache 的时候，需要从 State 里加载数据</li>
+<li>做 Checkpoint，需要把 Cache 里的数据刷到 State里</li>
+<li>LRUCache 满了要淘汰 Oldest数据，需要把 Cache 的数据刷到 State 里</li>
+</ol>
+<h3 id="处理流程-1"><a href="#处理流程-1" class="headerlink" title="处理流程"></a>处理流程</h3><p> <img src="https://static.yximgs.com/udata/pkg/EE-KSTACK/8eda9b04aefbb4859dc0482e1cdee0d4.png" alt="4"></p>
+<h2 id="RetractableTopNFunction"><a href="#RetractableTopNFunction" class="headerlink" title="RetractableTopNFunction"></a>RetractableTopNFunction</h2><h3 id="内存-Cache-设计"><a href="#内存-Cache-设计" class="headerlink" title="内存 Cache 设计"></a>内存 Cache 设计</h3><p>无 Cache</p>
+<h3 id="State-设计-2"><a href="#State-设计-2" class="headerlink" title="State 设计"></a>State 设计</h3><h4 id="存储的内容-2"><a href="#存储的内容-2" class="headerlink" title="存储的内容"></a>存储的内容</h4><p>存储了所有的输入数据</p>
+<h4 id="存储格式-2"><a href="#存储格式-2" class="headerlink" title="存储格式"></a>存储格式</h4><figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">1. MapState&lt;RowData, List&lt;RowData&gt;&gt;(Key 是 SortKey，Value 是 Records 列表）</span><br><span class="line">2. ValueState&lt;SortedMap&lt;RowData, Long&gt; （Key 是 SortKey，Value 是 Records记录条数），用处是尽量减少 State 访问。缺点是两个State 的 TTL可能不同步</span><br></pre></td></tr></table></figure>
+
+<h4 id="State-读写时机-2"><a href="#State-读写时机-2" class="headerlink" title="State 读写时机"></a>State 读写时机</h4><p>Per Record 和 State 交互。</p>
+<h3 id="处理流程-2"><a href="#处理流程-2" class="headerlink" title="处理流程"></a>处理流程</h3><p><img src="https://static.yximgs.com/udata/pkg/EE-KSTACK/08516102222742e4ad84e520ea21bb74.png" alt="5"></p>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/Flink/" rel="tag"># Flink</a>
+              <a href="/tags/Flink-SQL/" rel="tag"># Flink SQL</a>
+              <a href="/tags/TopN/" rel="tag"># TopN</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/read-user-conf/" rel="prev" title="如何在 UDF 里读取自定义的参数值">
+      <i class="fa fa-chevron-left"></i> 如何在 UDF 里读取自定义的参数值
+    </a></div>
+      <div class="post-nav-item"></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let { activeClass } = CONFIG.comments;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          Table of Contents
+        </li>
+        <li class="sidebar-nav-overview">
+          Overview
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#%E5%89%8D%E8%A8%80"><span class="nav-number">1.</span> <span class="nav-text">前言</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#Plan-%E9%87%8D%E5%86%99"><span class="nav-number">2.</span> <span class="nav-text">Plan 重写</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#%E5%85%A8%E5%B1%80-TopN"><span class="nav-number">2.1.</span> <span class="nav-text">全局 TopN</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%86%99%E6%B3%951"><span class="nav-number">2.1.1.</span> <span class="nav-text">写法1</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%86%99%E6%B3%952"><span class="nav-number">2.1.2.</span> <span class="nav-text">写法2</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E5%88%86%E7%BB%84-TopN"><span class="nav-number">2.2.</span> <span class="nav-text">分组 TopN</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#ROW-NUMBER-%E5%86%99%E6%B3%95%EF%BC%8C%E4%BC%98%E5%8C%96%E5%99%A8%E7%9A%84%E6%94%B9%E5%86%99%E8%A7%84%E5%88%99"><span class="nav-number">2.2.1.</span> <span class="nav-text">ROW_NUMBER 写法，优化器的改写规则</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#ORDER-BY-LIMIT-%E5%86%99%E6%B3%95%EF%BC%8C%E4%BC%98%E5%8C%96%E5%99%A8%E7%9A%84%E6%94%B9%E5%86%99%E8%A7%84%E5%88%99"><span class="nav-number">2.2.2.</span> <span class="nav-text">ORDER BY + LIMIT 写法，优化器的改写规则</span></a></li></ol></li></ol></li><li class="nav-item nav-level-1"><a class="nav-link" href="#TopN-Function-%E6%A2%B3%E7%90%86"><span class="nav-number">3.</span> <span class="nav-text">TopN Function 梳理</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#%E9%80%9A%E7%94%A8%E7%9A%84%E6%95%B0%E6%8D%AE%E7%BB%93%E6%9E%84"><span class="nav-number">3.1.</span> <span class="nav-text">通用的数据结构</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#TopNBuffer"><span class="nav-number">3.1.1.</span> <span class="nav-text">TopNBuffer</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#LRUMap"><span class="nav-number">3.1.2.</span> <span class="nav-text">LRUMap</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#AppendOnlyTopNFunction"><span class="nav-number">3.2.</span> <span class="nav-text">AppendOnlyTopNFunction</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%86%85%E5%AD%98-Cache-%E7%9A%84%E8%AE%BE%E8%AE%A1"><span class="nav-number">3.2.1.</span> <span class="nav-text">内存 Cache 的设计</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#State-%E8%AE%BE%E8%AE%A1"><span class="nav-number">3.2.2.</span> <span class="nav-text">State 设计</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#%E5%AD%98%E5%82%A8%E7%9A%84%E5%86%85%E5%AE%B9"><span class="nav-number">3.2.2.1.</span> <span class="nav-text">存储的内容</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#%E5%AD%98%E5%82%A8%E6%A0%BC%E5%BC%8F"><span class="nav-number">3.2.2.2.</span> <span class="nav-text">存储格式</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#State-%E8%AF%BB%E5%86%99%E6%97%B6%E6%9C%BA"><span class="nav-number">3.2.2.3.</span> <span class="nav-text">State 读写时机</span></a></li></ol></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%A4%84%E7%90%86%E6%B5%81%E7%A8%8B"><span class="nav-number">3.2.3.</span> <span class="nav-text">处理流程</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#UpdateFastRankFunction"><span class="nav-number">3.3.</span> <span class="nav-text">UpdateFastRankFunction</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%86%85%E5%AD%98-Cache-%E7%9A%84%E8%AE%BE%E8%AE%A1-1"><span class="nav-number">3.3.1.</span> <span class="nav-text">内存 Cache 的设计</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#State-%E8%AE%BE%E8%AE%A1-1"><span class="nav-number">3.3.2.</span> <span class="nav-text">State 设计</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#%E5%AD%98%E5%82%A8%E7%9A%84%E5%86%85%E5%AE%B9-1"><span class="nav-number">3.3.2.1.</span> <span class="nav-text">存储的内容</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#%E5%AD%98%E5%82%A8%E6%A0%BC%E5%BC%8F-1"><span class="nav-number">3.3.2.2.</span> <span class="nav-text">存储格式</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#State-%E8%AF%BB%E5%86%99%E6%97%B6%E6%9C%BA-1"><span class="nav-number">3.3.2.3.</span> <span class="nav-text">State 读写时机</span></a></li></ol></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%A4%84%E7%90%86%E6%B5%81%E7%A8%8B-1"><span class="nav-number">3.3.3.</span> <span class="nav-text">处理流程</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#RetractableTopNFunction"><span class="nav-number">3.4.</span> <span class="nav-text">RetractableTopNFunction</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%86%85%E5%AD%98-Cache-%E8%AE%BE%E8%AE%A1"><span class="nav-number">3.4.1.</span> <span class="nav-text">内存 Cache 设计</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#State-%E8%AE%BE%E8%AE%A1-2"><span class="nav-number">3.4.2.</span> <span class="nav-text">State 设计</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#%E5%AD%98%E5%82%A8%E7%9A%84%E5%86%85%E5%AE%B9-2"><span class="nav-number">3.4.2.1.</span> <span class="nav-text">存储的内容</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#%E5%AD%98%E5%82%A8%E6%A0%BC%E5%BC%8F-2"><span class="nav-number">3.4.2.2.</span> <span class="nav-text">存储格式</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#State-%E8%AF%BB%E5%86%99%E6%97%B6%E6%9C%BA-2"><span class="nav-number">3.4.2.3.</span> <span class="nav-text">State 读写时机</span></a></li></ol></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%A4%84%E7%90%86%E6%B5%81%E7%A8%8B-2"><span class="nav-number">3.4.3.</span> <span class="nav-text">处理流程</span></a></li></ol></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">张静</p>
+  <div class="site-description" itemprop="description"></div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">7</span>
+          <span class="site-state-item-name">posts</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-tags">
+        <span class="site-state-item-count">6</span>
+        <span class="site-state-item-name">tags</span>
+      </div>
+  </nav>
+</div>
+  <div class="links-of-author motion-element">
+      <span class="links-of-author-item">
+        <a href="https://github.com/beyond1920" title="GitHub → https:&#x2F;&#x2F;github.com&#x2F;beyond1920" rel="noopener" target="_blank"><i class="fab fa-github fa-fw"></i>GitHub</a>
+      </span>
+      <span class="links-of-author-item">
+        <a href="mailto:beyond1920@gmail.com" title="E-Mail → mailto:beyond1920@gmail.com" rel="noopener" target="_blank"><i class="fa fa-envelope fa-fw"></i>E-Mail</a>
+      </span>
+  </div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2021</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">张静</span>
+</div>
+  <div class="powered-by">Powered by <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> & <a href="https://muse.theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Muse</a>
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+
+<script src="/js/utils.js"></script>
+
+<script src="/js/motion.js"></script>
+
+
+<script src="/js/schemes/muse.js"></script>
+
+
+<script src="/js/next-boot.js"></script>
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+  <script src="//cdn.jsdelivr.net/npm/quicklink@1/dist/quicklink.umd.js"></script>
+  <script>
+      window.addEventListener('load', () => {
+      quicklink({
+        timeout : 3000,
+        priority: true,
+        ignores : [uri => uri.includes('#'),uri => uri === 'https://flink.wjh.me/topN/',]
+      });
+      });
+  </script>
+
+</body>
+</html>
