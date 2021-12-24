@@ -28,7 +28,7 @@
 <meta property="og:description" content="Flink SQL 系列教程索引本系列用于系列介绍 Flink SQL 的相关知识，内容持续更新。为了保证内容成体系，会把Flink SQL 里的常见的内容都列出来。其中Flink 社区官方文档已经介绍的十分全面的，会直接链接到官方文档上，且在标题里标注“传送门”。本系列内容包括用户手册，原理剖析，生产实践。内容持续更新。除非标题中标明是传送门，否则内容里全部是原创，如有错误，欢迎指出。另外，未经">
 <meta property="og:locale" content="en_US">
 <meta property="article:published_time" content="2021-09-11T10:38:32.000Z">
-<meta property="article:modified_time" content="2021-12-20T15:00:45.723Z">
+<meta property="article:modified_time" content="2021-12-24T11:21:14.908Z">
 <meta property="article:author" content="张静">
 <meta property="article:tag" content="main">
 <meta name="twitter:card" content="summary">
@@ -182,40 +182,24 @@
       <div class="post-body">
           <h1 id="Flink-SQL-系列教程索引"><a href="#Flink-SQL-系列教程索引" class="headerlink" title="Flink SQL 系列教程索引"></a>Flink SQL 系列教程索引</h1><p>本系列用于系列介绍 Flink SQL 的相关知识，内容持续更新。为了保证内容成体系，会把Flink SQL 里的常见的内容都列出来。其中Flink 社区官方文档已经介绍的十分全面的，会直接链接到官方文档上，且在标题里标注“传送门”。<br>本系列内容包括用户手册，原理剖析，生产实践。内容持续更新。<br><strong>除非标题中标明是传送门，否则内容里全部是原创，如有错误，欢迎指出。另外，未经同意，不得转载，感谢配合。</strong></p>
 <ol>
-<li><p><a target="_blank" rel="noopener" href="https://ci.apache.org/projects/flink/flink-docs-master/zh/docs/dev/table/sql/queries/group-agg/">Flink SQL 系列文章: 无限流上的聚合功能(传送门至社区文档)</a></p>
-</li>
-<li><p><a target="_blank" rel="noopener" href="https://ci.apache.org/projects/flink/flink-docs-master/docs/dev/table/tuning/">Flink SQL 系列文章: 无限流上的聚合功能的高阶优化(传送门至社区文档)</a></p>
-</li>
-<li><p><a target="_blank" rel="noopener" href="https://ci.apache.org/projects/flink/flink-docs-master/zh/docs/dev/table/sql/queries/window-agg/#group-window-aggregation">Flink SQL 系列文章: 窗口聚合功能（传送门至社区文档)</a></p>
-</li>
-<li><p><a href="/window-agg-cube"><strong>FLINK SQL 系列文章: 窗口聚合支持多维分析</strong></a></p>
-</li>
-<li><p><a href="/day-acc-solution"><strong>Flink SQL 系列文章: 针对天级别聚合且按分钟打点的需求，方案演进之路</strong></a></p>
-</li>
-<li><p><a target="_blank" rel="noopener" href="https://ci.apache.org/projects/flink/flink-docs-master/zh/docs/dev/table/sql/queries/window-tvf/">Flink SQL 系列文章：1.13 版本引入的 Window TVF 是什么（传送门至社区文档）</a></p>
-</li>
-<li><p><a href="/window-watermark-state"><strong>Flink SQL 系列文章：CUMULATE 窗口聚合计算 UV 时，曲线出现尖刺的问题跟进和解决</strong></a></p>
-</li>
-<li><p><a href="/mapstate-reuse"><strong>Flink SQL 系列文章：Distinct MapState 状态复用优化</strong></a></p>
-</li>
-<li><p><a target="_blank" rel="noopener" href="https://nightlies.apache.org/flink/flink-docs-master/docs/dev/table/sql/queries/window-join/">Flink SQL 系列文章: Window Join(传送门至社区文档)</a></p>
-</li>
-<li><p><a href="/lookup-join-code-reader"><strong>Flink SQL 系列文章: 维表 JOIN 的原理介绍及源码剖析</strong></a></p>
-</li>
-<li><p><a target="_blank" rel="noopener" href="https://ci.apache.org/projects/flink/flink-docs-master/zh/docs/dev/table/sql/queries/joins/">Flink SQL 系列文章: 流上的各种 JOIN 的介绍（传送门至社区文档）</a></p>
-</li>
-<li><p><a target="_blank" rel="noopener" href="https://ci.apache.org/projects/flink/flink-docs-master/docs/dev/table/sql/queries/window-topn/">Flink SQL 系列文章：Window TopN（传送门至社区文档）</a></p>
-</li>
-<li><p><a target="_blank" rel="noopener" href="https://ci.apache.org/projects/flink/flink-docs-master/docs/dev/table/sql/queries/topn/">Flink SQL 系列：流式 TopN 功能介绍（传送门至社区文档）</a></p>
-</li>
-<li><p><a href="/topN"><strong>Flink SQL 系列：流式 TopN 原理介绍及源码剖析</strong></a></p>
-</li>
-<li><p><a target="_blank" rel="noopener" href="https://ci.apache.org/projects/flink/flink-docs-master/zh/docs/dev/table/sql/queries/deduplication/">Flink SQL 系列文章：基于 Deduplicate 实现首次流，末次流等去重需求（传送门至社区文档）</a></p>
-</li>
-<li><p><a target="_blank" rel="noopener" href="https://ci.apache.org/projects/flink/flink-docs-master/docs/dev/table/sql/queries/match_recognize/">Flink SQL 系列文章：如何使用 FLINK SQL 实现 CEP 需求（传送门至社区文档）</a></p>
-</li>
-<li><p><a href="/read-user-conf"><strong>Flink SQL 系列文章：如何在 UDF 里读取自定义的参数值</strong></a></p>
-</li>
+<li><a target="_blank" rel="noopener" href="https://ci.apache.org/projects/flink/flink-docs-master/zh/docs/dev/table/sql/queries/group-agg/">Flink SQL 系列文章: 无限流上的聚合功能(传送门至社区文档)</a></li>
+<li><a target="_blank" rel="noopener" href="https://ci.apache.org/projects/flink/flink-docs-master/docs/dev/table/tuning/">Flink SQL 系列文章: 无限流上的聚合功能的高阶优化(传送门至社区文档)</a></li>
+<li><a href="/distinct-key-skew">Flink SQL 系列文章：如何解决无限流聚合上 Distinct Key 的倾斜问题</a></li>
+<li><a target="_blank" rel="noopener" href="https://ci.apache.org/projects/flink/flink-docs-master/zh/docs/dev/table/sql/queries/window-agg/#group-window-aggregation">Flink SQL 系列文章: 窗口聚合功能（传送门至社区文档)</a></li>
+<li><a href="/window-agg-cube"><strong>FLINK SQL 系列文章: 窗口聚合支持多维分析</strong></a></li>
+<li><a href="/day-acc-solution"><strong>Flink SQL 系列文章: 针对天级别聚合且按分钟打点的需求，方案演进之路</strong></a></li>
+<li><a target="_blank" rel="noopener" href="https://ci.apache.org/projects/flink/flink-docs-master/zh/docs/dev/table/sql/queries/window-tvf/">Flink SQL 系列文章：1.13 版本引入的 Window TVF 是什么（传送门至社区文档）</a></li>
+<li><a href="/window-watermark-state"><strong>Flink SQL 系列文章：CUMULATE 窗口聚合计算 UV 时，曲线出现尖刺的问题跟进和解决</strong></a></li>
+<li><a href="/mapstate-reuse"><strong>Flink SQL 系列文章：Distinct MapState 状态复用优化</strong></a></li>
+<li><a target="_blank" rel="noopener" href="https://nightlies.apache.org/flink/flink-docs-master/docs/dev/table/sql/queries/window-join/">Flink SQL 系列文章: Window Join(传送门至社区文档)</a></li>
+<li><a href="/lookup-join-code-reader"><strong>Flink SQL 系列文章: 维表 JOIN 的原理介绍及源码剖析</strong></a></li>
+<li><a target="_blank" rel="noopener" href="https://ci.apache.org/projects/flink/flink-docs-master/zh/docs/dev/table/sql/queries/joins/">Flink SQL 系列文章: 流上的各种 JOIN 的介绍（传送门至社区文档）</a></li>
+<li><a target="_blank" rel="noopener" href="https://ci.apache.org/projects/flink/flink-docs-master/docs/dev/table/sql/queries/window-topn/">Flink SQL 系列文章：Window TopN（传送门至社区文档）</a></li>
+<li><a target="_blank" rel="noopener" href="https://ci.apache.org/projects/flink/flink-docs-master/docs/dev/table/sql/queries/topn/">Flink SQL 系列：流式 TopN 功能介绍（传送门至社区文档）</a></li>
+<li><a href="/topN"><strong>Flink SQL 系列：流式 TopN 原理介绍及源码剖析</strong></a></li>
+<li><a target="_blank" rel="noopener" href="https://ci.apache.org/projects/flink/flink-docs-master/zh/docs/dev/table/sql/queries/deduplication/">Flink SQL 系列文章：基于 Deduplicate 实现首次流，末次流等去重需求（传送门至社区文档）</a></li>
+<li><a target="_blank" rel="noopener" href="https://ci.apache.org/projects/flink/flink-docs-master/docs/dev/table/sql/queries/match_recognize/">Flink SQL 系列文章：如何使用 FLINK SQL 实现 CEP 需求（传送门至社区文档）</a></li>
+<li><a href="/read-user-conf"><strong>Flink SQL 系列文章：如何在 UDF 里读取自定义的参数值</strong></a></li>
 </ol>
 <h1 id="Flink-相关的优质资料"><a href="#Flink-相关的优质资料" class="headerlink" title="Flink 相关的优质资料"></a>Flink 相关的优质资料</h1><h2 id="社区入门文档"><a href="#社区入门文档" class="headerlink" title="社区入门文档"></a>社区入门文档</h2><p>社区有非常多的资料可以用于入门学习，整理出其中的精华资料，供有需要的老铁们。</p>
 <h3 id="官方用户手册"><a href="#官方用户手册" class="headerlink" title="官方用户手册"></a>官方用户手册</h3><p><a target="_blank" rel="noopener" href="https://ci.apache.org/projects/flink/flink-docs-master/zh/">用户手册</a></p>
@@ -303,12 +287,12 @@
       <div class="site-state-item site-state-posts">
           <a href="/archives/">
         
-          <span class="site-state-item-count">7</span>
+          <span class="site-state-item-count">8</span>
           <span class="site-state-item-name">posts</span>
         </a>
       </div>
       <div class="site-state-item site-state-tags">
-        <span class="site-state-item-count">6</span>
+        <span class="site-state-item-count">7</span>
         <span class="site-state-item-name">tags</span>
       </div>
   </nav>

@@ -20,25 +20,22 @@
     var CONFIG = {"hostname":"beyond1920.github.io","root":"/","scheme":"Muse","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":false,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}};
   </script>
 
-  <meta name="description" content="前言本文是 Flink SQL 系列中的一篇，更多文章请关注Flink SQL 系列文档。内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。 原理梳理LookupJoin 根据获取维表数据的方式是同步获取还是异步获取分为两种实现。同步的实现基于 ProcessOperator，异步的实现基于 AsyncWaitOperator。 Sync LookupJoin对于同步的 Look">
+  <meta name="description" content="前言本文是 Flink SQL 系列中的一篇，更多文章请关注Flink SQL 系列文档。内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。 背景1SELECT day, COUNT(DISTINCT user_id) AS UV FROM T GROUP BY day  对于计算 UV 的业务，比如下面的 SQL。COUNT DISTINCT 在 Local 聚合时，如果 DI">
 <meta property="og:type" content="article">
-<meta property="og:title" content="维表 JOIN 的原理介绍及源码剖析">
-<meta property="og:url" content="https://beyond1920.github.io/lookup-join-code-reader/index.html">
+<meta property="og:title" content="如何解决无限流聚合上 Distinct Key 的倾斜问题">
+<meta property="og:url" content="https://beyond1920.github.io/distinct-key-skew/index.html">
 <meta property="og:site_name" content="张静">
-<meta property="og:description" content="前言本文是 Flink SQL 系列中的一篇，更多文章请关注Flink SQL 系列文档。内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。 原理梳理LookupJoin 根据获取维表数据的方式是同步获取还是异步获取分为两种实现。同步的实现基于 ProcessOperator，异步的实现基于 AsyncWaitOperator。 Sync LookupJoin对于同步的 Look">
+<meta property="og:description" content="前言本文是 Flink SQL 系列中的一篇，更多文章请关注Flink SQL 系列文档。内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。 背景1SELECT day, COUNT(DISTINCT user_id) AS UV FROM T GROUP BY day  对于计算 UV 的业务，比如下面的 SQL。COUNT DISTINCT 在 Local 聚合时，如果 DI">
 <meta property="og:locale" content="en_US">
-<meta property="og:image" content="https://beyond1920.github.io/lookup-join-code-reader/144d183cefd8bb5a60b9f36820bcb31a.png">
-<meta property="og:image" content="https://beyond1920.github.io/lookup-join-code-reader/8f56c8da7237f5c6f561d38a96bf67f1.png">
-<meta property="article:published_time" content="2021-09-11T10:43:34.000Z">
-<meta property="article:modified_time" content="2021-09-11T14:28:40.480Z">
+<meta property="article:published_time" content="2021-12-24T11:43:34.000Z">
+<meta property="article:modified_time" content="2021-12-24T11:20:01.165Z">
 <meta property="article:author" content="张静">
-<meta property="article:tag" content="Join">
 <meta property="article:tag" content="Flink">
 <meta property="article:tag" content="Flink SQL">
+<meta property="article:tag" content="Aggregate">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:image" content="https://beyond1920.github.io/lookup-join-code-reader/144d183cefd8bb5a60b9f36820bcb31a.png">
 
-<link rel="canonical" href="https://beyond1920.github.io/lookup-join-code-reader/">
+<link rel="canonical" href="https://beyond1920.github.io/distinct-key-skew/">
 
 
 <script id="page-configurations">
@@ -51,7 +48,7 @@
   };
 </script>
 
-  <title>维表 JOIN 的原理介绍及源码剖析 | 张静</title>
+  <title>如何解决无限流聚合上 Distinct Key 的倾斜问题 | 张静</title>
   
 
 
@@ -166,7 +163,7 @@
   
   
   <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="en">
-    <link itemprop="mainEntityOfPage" href="https://beyond1920.github.io/lookup-join-code-reader/">
+    <link itemprop="mainEntityOfPage" href="https://beyond1920.github.io/distinct-key-skew/">
 
     <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
       <meta itemprop="image" content="/images/avatar.gif">
@@ -179,7 +176,7 @@
     </span>
       <header class="post-header">
         <h1 class="post-title" itemprop="name headline">
-          维表 JOIN 的原理介绍及源码剖析
+          如何解决无限流聚合上 Distinct Key 的倾斜问题
         </h1>
 
         <div class="post-meta">
@@ -190,7 +187,7 @@
               <span class="post-meta-item-text">Posted on</span>
               
 
-              <time title="Created: 2021-09-11 18:43:34 / Modified: 22:28:40" itemprop="dateCreated datePublished" datetime="2021-09-11T18:43:34+08:00">2021-09-11</time>
+              <time title="Created: 2021-12-24 19:43:34 / Modified: 19:20:01" itemprop="dateCreated datePublished" datetime="2021-12-24T19:43:34+08:00">2021-12-24</time>
             </span>
 
           
@@ -205,21 +202,36 @@
 
       
         <h1 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h1><p>本文是 Flink SQL 系列中的一篇，更多文章请关注<a href="/">Flink SQL 系列文档</a>。<br>内容全部是原创，如有错误，欢迎铁汁们指出。另外，未经同意，不得转载。</p>
-<h1 id="原理梳理"><a href="#原理梳理" class="headerlink" title="原理梳理"></a>原理梳理</h1><p>LookupJoin 根据获取维表数据的方式是同步获取还是异步获取分为两种实现。同步的实现基于 ProcessOperator，异步的实现基于 AsyncWaitOperator。</p>
-<h2 id="Sync-LookupJoin"><a href="#Sync-LookupJoin" class="headerlink" title="Sync LookupJoin"></a>Sync LookupJoin</h2><p><img src="144d183cefd8bb5a60b9f36820bcb31a.png" alt="1"><br>对于同步的 LookupJoin 来说，主表一条数据 Record 来了以后，会经过以下几个步骤：</p>
-<ol>
-<li>分析 Record 的 Key，基于 Key 去维表侧获取数据</li>
-<li>如果维表上有 Calc，维表返回的数据需要经过 CalcCollector，做过滤或者列裁剪后才会返回</li>
-<li>如果 JOIN 条件里除了维表上的 LookupKey 还有剩余的关联条件，经过 CodeGen TableFunctionCollector，过滤出满足 Remaing Condition 的数据</li>
-<li>TableFunctionCollector 里关联主表的 Record 和第3步返回的一条或多条维表记录</li>
-</ol>
-<h2 id="Async-LookupJoin"><a href="#Async-LookupJoin" class="headerlink" title="Async LookupJoin"></a>Async LookupJoin</h2><p><img src="8f56c8da7237f5c6f561d38a96bf67f1.png" alt="2"><br>异步的 LookupJoin 和同步的 LookupJoin 最大的区别就是当前主表的数据来了以后，发出异步关联请求后，不需要等请求返回，就可以处理下一条主表的输入数据了。对于异步的 LookupJoin 来说，主表一条数据 Record 来了以后，经过的流程：</p>
-<ol>
-<li>分析 Record 的 Key，向维表发出异步的数据请求后，就可以处理下一条输入数据了</li>
-<li>如果维表上有 Calc，维表返回的数据需要经过 TemporalTableCalcResultFuture，做过滤或者列裁剪后才会返回</li>
-<li>如果 JOIN 条件里除了维表上的 LookupKey 还有剩余的关联条件，经过 CodeGen TableFunctionResultFuture，过滤出满足 Remaing Condition 的数据</li>
-<li>JoinedRowResultFuture 关联主表的 Record 和第3步返回的一条或多条维表记录</li>
-</ol>
+<h1 id="背景"><a href="#背景" class="headerlink" title="背景"></a>背景</h1><figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> <span class="keyword">day</span>, <span class="built_in">COUNT</span>(<span class="keyword">DISTINCT</span> user_id) <span class="keyword">AS</span> UV <span class="keyword">FROM</span> T <span class="keyword">GROUP</span> <span class="keyword">BY</span> <span class="keyword">day</span></span><br></pre></td></tr></table></figure>
+
+<p>对于计算 UV 的业务，比如下面的 SQL。COUNT DISTINCT 在 Local 聚合时，如果 DISINCT KEY 的去重率不高，Global 节点可能仍然存在热点。<br>如何解决该问题</p>
+<h1 id="解决方案"><a href="#解决方案" class="headerlink" title="解决方案"></a>解决方案</h1><h2 id="方案1：手动改写-SQL"><a href="#方案1：手动改写-SQL" class="headerlink" title="方案1：手动改写 SQL"></a>方案1：手动改写 SQL</h2><p>第一种方式是手动改写SQL变成两层聚合（增加按照 distinct key 取模的打散层），比如改写成如下 SQL。</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">SELECT</span> <span class="keyword">day</span>, <span class="built_in">SUM</span>(part_uv) total <span class="keyword">FROM</span> (</span><br><span class="line"></span><br><span class="line">  <span class="keyword">SELECT</span> <span class="keyword">day</span>, <span class="built_in">COUNT</span>(<span class="keyword">DISTINCT</span> user_id) <span class="keyword">as</span> part_uv <span class="keyword">FROM</span> T </span><br><span class="line"></span><br><span class="line">  <span class="keyword">GROUP</span> <span class="keyword">BY</span> <span class="keyword">day</span>, <span class="built_in">MOD</span>(user_id, <span class="number">1024</span>)</span><br><span class="line"></span><br><span class="line">) <span class="keyword">GROUP</span> <span class="keyword">BY</span> <span class="keyword">day</span></span><br></pre></td></tr></table></figure>
+
+<h2 id="方案1的缺点"><a href="#方案1的缺点" class="headerlink" title="方案1的缺点"></a>方案1的缺点</h2><p>这种做法有两个缺点：</p>
+<ul>
+<li><p>用户需要手动改写SQL，增加了开发难度。</p>
+</li>
+<li><p>很难处理有多个 COUNT DISTINCT 聚合函数的场景。比如同时计算 COUNT (DISTINCT user_id), COUNT DISTINCT(buyer_id) 的场景。</p>
+</li>
+</ul>
+<h2 id="方案2-引擎提供的自动打散策略"><a href="#方案2-引擎提供的自动打散策略" class="headerlink" title="方案2: 引擎提供的自动打散策略"></a>方案2: 引擎提供的自动打散策略</h2><p>使用 Flink 框架提供的自动打散策略，即 Partial Final 优化，无需改写 SQL。更多关于引擎层 Partial Final 自动优化请参考社区的文章：<a target="_blank" rel="noopener" href="https://nightlies.apache.org/flink/flink-docs-master/zh/docs/dev/table/tuning/#%e6%8b%86%e5%88%86-distinct-%e8%81%9a%e5%90%88">拆分 distinct 聚合</a></p>
+<p>相关配置参数如下：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"># 显示打开自动打散策略，默认是 <span class="literal">false</span></span><br><span class="line"></span><br><span class="line">table.optimizer.distinct<span class="operator">-</span>agg.split.enabled : <span class="literal">true</span></span><br><span class="line"></span><br><span class="line"># 默认值<span class="number">1024</span>，可以根据业务数据量和热点情况，设置这个取模值</span><br><span class="line"></span><br><span class="line">table.optimizer.distinct<span class="operator">-</span>agg.split.bucket<span class="operator">-</span>num : <span class="number">1024</span></span><br></pre></td></tr></table></figure>
+
+
+
+<p>如何判断是否生效：</p>
+<ul>
+<li><p>Flink Web UI 观察最终生成拓扑图的节点名中是否包含 Expand 节点</p>
+</li>
+<li><p>原来一层的聚合变成两层的聚合</p>
+</li>
+<li><p>里层的聚合 Key 除了SQL的 GroupBy Key，还多了 Distinct Key</p>
+</li>
+</ul>
+<h2 id="方案2的缺点"><a href="#方案2的缺点" class="headerlink" title="方案2的缺点"></a>方案2的缺点</h2><p>这种做法可以灵活的处理多个 COUNT DISTINCT 的需求，但是有以下缺点：</p>
+<p>聚合里只可以包含如下聚合函数，暂不支持其他聚合函数的自动拆散，COUNT/AVG/MIN/MAX/SUM/LISTAGG/FIRST_VALUE/LAST_VALUE。</p>
 
     </div>
 
@@ -229,9 +241,9 @@
 
       <footer class="post-footer">
           <div class="post-tags">
-              <a href="/tags/Join/" rel="tag"># Join</a>
               <a href="/tags/Flink/" rel="tag"># Flink</a>
               <a href="/tags/Flink-SQL/" rel="tag"># Flink SQL</a>
+              <a href="/tags/Aggregate/" rel="tag"># Aggregate</a>
           </div>
 
         
@@ -240,13 +252,10 @@
         
     <div class="post-nav">
       <div class="post-nav-item">
-    <a href="/day-acc-solution/" rel="prev" title="针对天级别聚合且按分钟打点的需求，方案演进之路">
-      <i class="fa fa-chevron-left"></i> 针对天级别聚合且按分钟打点的需求，方案演进之路
+    <a href="/topN/" rel="prev" title="流式 TopN 原理介绍">
+      <i class="fa fa-chevron-left"></i> 流式 TopN 原理介绍
     </a></div>
-      <div class="post-nav-item">
-    <a href="/window-agg-cube/" rel="next" title="窗口聚合支持多维分析">
-      窗口聚合支持多维分析 <i class="fa fa-chevron-right"></i>
-    </a></div>
+      <div class="post-nav-item"></div>
     </div>
       </footer>
     
@@ -305,7 +314,7 @@
 
       <!--noindex-->
       <div class="post-toc-wrap sidebar-panel">
-          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#%E5%89%8D%E8%A8%80"><span class="nav-number">1.</span> <span class="nav-text">前言</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#%E5%8E%9F%E7%90%86%E6%A2%B3%E7%90%86"><span class="nav-number">2.</span> <span class="nav-text">原理梳理</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#Sync-LookupJoin"><span class="nav-number">2.1.</span> <span class="nav-text">Sync LookupJoin</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#Async-LookupJoin"><span class="nav-number">2.2.</span> <span class="nav-text">Async LookupJoin</span></a></li></ol></li></ol></div>
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#%E5%89%8D%E8%A8%80"><span class="nav-number">1.</span> <span class="nav-text">前言</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#%E8%83%8C%E6%99%AF"><span class="nav-number">2.</span> <span class="nav-text">背景</span></a></li><li class="nav-item nav-level-1"><a class="nav-link" href="#%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88"><span class="nav-number">3.</span> <span class="nav-text">解决方案</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#%E6%96%B9%E6%A1%881%EF%BC%9A%E6%89%8B%E5%8A%A8%E6%94%B9%E5%86%99-SQL"><span class="nav-number">3.1.</span> <span class="nav-text">方案1：手动改写 SQL</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E6%96%B9%E6%A1%881%E7%9A%84%E7%BC%BA%E7%82%B9"><span class="nav-number">3.2.</span> <span class="nav-text">方案1的缺点</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E6%96%B9%E6%A1%882-%E5%BC%95%E6%93%8E%E6%8F%90%E4%BE%9B%E7%9A%84%E8%87%AA%E5%8A%A8%E6%89%93%E6%95%A3%E7%AD%96%E7%95%A5"><span class="nav-number">3.3.</span> <span class="nav-text">方案2: 引擎提供的自动打散策略</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E6%96%B9%E6%A1%882%E7%9A%84%E7%BC%BA%E7%82%B9"><span class="nav-number">3.4.</span> <span class="nav-text">方案2的缺点</span></a></li></ol></li></ol></div>
       </div>
       <!--/noindex-->
 
@@ -424,7 +433,7 @@
       quicklink({
         timeout : 3000,
         priority: true,
-        ignores : [uri => uri.includes('#'),uri => uri === 'https://beyond1920.github.io/lookup-join-code-reader/',]
+        ignores : [uri => uri.includes('#'),uri => uri === 'https://beyond1920.github.io/distinct-key-skew/',]
       });
       });
   </script>
